@@ -40,3 +40,28 @@ The history is short and uses concise descriptive commit messages. Prefer impera
 ## Security & Configuration Tips
 
 Do not commit API keys, `.env` files, logs, CSV exports, or DuckDB databases. Pipeline scripts require `NASDAQ_DATA_LINK_API_KEY` in the environment. Treat `data/` as local state, not source code.
+
+## Tracker-Only Fix Workflow
+
+When asked to fix tracker items:
+- Read only `docs/agent_issue_tracker.md` first.
+- Select exactly one Open issue unless the user names one.
+- Do not hunt for new issues.
+- Do not perform broad refactors.
+- Inspect only files needed to understand and fix that tracker item.
+- Implement the smallest safe fix.
+- Run the tracker item's Test Plan.
+- Update the tracker Status, Evidence, and Validation Result.
+- Stop after one item.
+
+### Context Discipline
+
+When fixing tracker items:
+- Read only:
+  - the tracker item
+  - directly relevant contracts
+  - directly relevant source files
+  - directly relevant tests
+- Avoid broad repository scans.
+- Avoid opportunistic refactors.
+- Avoid style-only edits.
