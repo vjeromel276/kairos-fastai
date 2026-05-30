@@ -1,6 +1,6 @@
 # Agent Issue Tracker
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This tracker captures review findings for the project base code. Use each entry to define the problem, implement the fix, record verification steps, and note final results.
 
@@ -12,17 +12,28 @@ This tracker captures review findings for the project base code. Use each entry 
 
 ## AIT-001: Paginated Downloads Can Silently Truncate Large Tables
 
-Status: Open
+Status: Fixed
 
 Problem: `full_sharadar_refresh.py` stops after `PAGE_SAFETY_LIMIT = 500`, and `sharadar_data_sync.py` stops after 50 pages. If the limit is reached, the scripts log a warning but still return the partial DataFrame as successful. Large tables such as `sep_base`, `daily`, `sf2`, and `sf3` exceed these row counts in a full download.
 
 Fix plan: Treat page-limit exhaustion as a hard failure, or replace all-at-once DataFrame collection with page-by-page staging into a temp table and commit only after the cursor is exhausted.
 
-Implementation notes: Not implemented.
+Implementation notes: Implemented on 2026-05-26. The pagination safety limit now fails the download when the API still returns `next_cursor_id` at the cap, so callers mark the table as `download_failed` before any merge or replacement can run.
+
+Files changed:
+- `scripts/pipeline/sharadar_data_sync.py`
+- `scripts/pipeline/full_sharadar_refresh.py`
+- `tests/test_pagination_safety.py`
 
 Test plan: Mock paginated API responses where `next_cursor_id` remains present at the safety limit. Verify the sync exits non-zero and does not create or replace a source table with partial data.
 
-Result: Not tested after fix.
+Evidence: Added focused mocked-pagination tests for both the daily sync and full refresh entrypoints. The tests force a two-page safety limit while the mocked API keeps returning `next_cursor_id`, then verify `main()` returns non-zero and the source table is not created or replaced with partial data.
+
+Validation command:
+- `python -m compileall scripts`
+- `python -m pytest tests/test_pagination_safety.py`
+
+Validation result: Passed. `compileall` completed successfully; pytest reported `2 passed in 0.55s`.
 
 ## AIT-002: Same-Date Incremental Updates Are Dropped
 
@@ -68,17 +79,27 @@ Result: Not tested after fix.
 
 ## AIT-005: Full Replacement Is Not Atomic
 
-Status: Open
+Status: Fixed
 
 Problem: `replace_full()` drops the existing table before creating the replacement. If table creation fails, the database is left without that source table.
 
 Fix plan: Create a replacement temp table first, validate row count/schema, then swap inside a transaction. Keep the old table until the new table is ready.
 
-Implementation notes: Not implemented.
+Implementation notes: Implemented on 2026-05-26. `replace_full()` now creates and validates a temporary replacement table before entering the swap. The old table is dropped and the replacement is created inside a transaction, so failures during the swap roll back to the original table.
+
+Files changed:
+- `scripts/pipeline/full_sharadar_refresh.py`
+- `tests/test_full_replace_atomic.py`
 
 Test plan: Inject a failure between replacement creation and swap. Verify the original table remains present and unchanged.
 
-Result: Not tested after fix.
+Evidence: Added a focused DuckDB test that seeds an existing `tickers` table, injects a failure after the transactional drop and before replacement creation, and verifies the original row remains present afterward.
+
+Validation command:
+- `python -m compileall scripts`
+- `python -m pytest tests/test_full_replace_atomic.py`
+
+Validation result: Passed. `compileall` completed successfully; pytest reported `1 passed in 0.32s`.
 
 ## AIT-006: Help Text Still References `kairos-flow.duckdb`
 

@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 # API configuration
 API_KEY_ENV = "NASDAQ_DATA_LINK_API_KEY"
 BASE_URL = "https://data.nasdaq.com/api/v3/datatables/SHARADAR"
+PAGE_SAFETY_LIMIT = 50
 
 # Table configurations
 TABLES = {
@@ -284,12 +285,13 @@ def download_new_data_paginated(
             if not cursor_id:
                 break
             
-            page += 1
+            if page >= PAGE_SAFETY_LIMIT:
+                raise RuntimeError(
+                    f"Pagination safety limit reached for {table_name}: "
+                    f"{PAGE_SAFETY_LIMIT} pages downloaded and API still returned next_cursor_id"
+                )
             
-            # Safety limit
-            if page > 50:
-                logger.warning(f"  Reached page limit (50), stopping")
-                break
+            page += 1
         
         if not all_dfs:
             logger.warning(f"  No data downloaded")

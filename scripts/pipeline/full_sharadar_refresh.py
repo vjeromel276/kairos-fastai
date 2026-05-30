@@ -57,6 +57,7 @@ import io
 import logging
 import os
 import sys
+import uuid
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, List, Tuple
 
@@ -341,10 +342,13 @@ def download_paginated(
             if not cursor_id:
                 break
 
+            if page >= PAGE_SAFETY_LIMIT:
+                raise RuntimeError(
+                    f"Pagination safety limit reached for {table_name}: "
+                    f"{PAGE_SAFETY_LIMIT} pages downloaded and API still returned next_cursor_id"
+                )
+
             page += 1
-            if page > PAGE_SAFETY_LIMIT:
-                logger.warning(f"  Reached page limit ({PAGE_SAFETY_LIMIT}), stopping")
-                break
 
         if not all_dfs:
             logger.warning(f"  No data downloaded")
@@ -388,17 +392,51 @@ def replace_full(
     df: pd.DataFrame,
     table_config: Dict,
 ) -> Tuple[int, int]:
-    """Drop and recreate the table from df. Returns (rows_before, rows_after)."""
+    """Replace a full-reload table without dropping the old table until swap time."""
     db_table = table_config["db_table"]
+    temp_table = f"tmp_{db_table}_replacement_{uuid.uuid4().hex}"
     tables = conn.execute("SHOW TABLES").fetchdf()["name"].tolist()
     before = (
         conn.execute(f"SELECT COUNT(*) FROM {db_table}").fetchone()[0]
         if db_table in tables else 0
     )
-    conn.execute(f"DROP TABLE IF EXISTS {db_table}")
-    conn.execute(f"CREATE TABLE {db_table} AS SELECT * FROM df")
-    after = conn.execute(f"SELECT COUNT(*) FROM {db_table}").fetchone()[0]
-    return before, after
+
+    temp_created = False
+    try:
+        conn.execute(f"CREATE TEMP TABLE {temp_table} AS SELECT * FROM df")
+        temp_created = True
+        after = conn.execute(f"SELECT COUNT(*) FROM {temp_table}").fetchone()[0]
+        expected_rows = len(df)
+        if after != expected_rows:
+            raise RuntimeError(
+                f"Replacement row-count mismatch for {db_table}: "
+                f"expected {expected_rows}, got {after}"
+            )
+
+        temp_columns = [
+            column[0]
+            for column in conn.execute(f"SELECT * FROM {temp_table} LIMIT 0").description
+        ]
+        expected_columns = list(df.columns)
+        if temp_columns != expected_columns:
+            raise RuntimeError(
+                f"Replacement column mismatch for {db_table}: "
+                f"expected {expected_columns}, got {temp_columns}"
+            )
+
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            conn.execute(f"DROP TABLE IF EXISTS {db_table}")
+            conn.execute(f"CREATE TABLE {db_table} AS SELECT * FROM {temp_table}")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+        return before, after
+    finally:
+        if temp_created:
+            conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
 
 
 def refresh_table(
