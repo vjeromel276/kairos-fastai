@@ -34,19 +34,19 @@ data. Use `--skip-calendar` to disable that post-refresh step.
 
 Usage:
     # Refresh everything that's stale (excluding INDICATORS)
-    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb
+    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb
 
     # Check only (no download)
-    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb --check-only
+    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --check-only
 
     # Refresh specific tables
-    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb --tables METRICS TICKERS
+    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --tables METRICS TICKERS
 
     # Refresh INDICATORS reference table (must be explicit)
-    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb --tables INDICATORS
+    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --tables INDICATORS
 
     # Force re-download even if up to date
-    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb --tables SF3 --force
+    python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --tables SF3 --force
 
 Environment:
     NASDAQ_DATA_LINK_API_KEY: Your Nasdaq Data Link API key
@@ -252,7 +252,13 @@ def check_api_for_new_data(
     url = f"{BASE_URL}/{table_name}.json?"
 
     if local_max:
-        check_date = local_max + timedelta(days=1)
+        # use_gte tables intentionally refresh the max-date overlap so
+        # same-date corrections are not skipped.
+        check_date = (
+            local_max
+            if table_config.get("use_gte", False)
+            else local_max + timedelta(days=1)
+        )
         url += f"{date_field}.gte={check_date.strftime('%Y-%m-%d')}&"
 
     url += f"qopts.columns={date_field}&"
@@ -369,9 +375,13 @@ def insert_incremental(
     df: pd.DataFrame,
     table_config: Dict,
 ) -> int:
-    """Append only rows strictly newer than local max. Returns rows added."""
+    """
+    Append new rows, refreshing gte overlap rows atomically.
+    Returns net rows added.
+    """
     db_table = table_config["db_table"]
     date_field = table_config["db_date_field"]
+    use_gte = table_config.get("use_gte", False)
 
     tables = conn.execute("SHOW TABLES").fetchdf()["name"].tolist()
     if db_table not in tables:
@@ -381,8 +391,36 @@ def insert_incremental(
 
     local_max = get_local_max_date(conn, table_config)
     before = conn.execute(f"SELECT COUNT(*) FROM {db_table}").fetchone()[0]
-    filter_clause = f"WHERE {date_field} > '{local_max}'" if local_max else ""
-    conn.execute(f"INSERT INTO {db_table} SELECT DISTINCT * FROM df {filter_clause}")
+
+    if local_max and use_gte:
+        overlap_start = local_max.isoformat()
+        logger.info(f"  Refreshing overlap window from {overlap_start}")
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            conn.execute(f"""
+                DELETE FROM {db_table}
+                WHERE {date_field} >= DATE '{overlap_start}'
+            """)
+            conn.execute(f"""
+                INSERT INTO {db_table}
+                SELECT DISTINCT * FROM df
+                WHERE {date_field} >= DATE '{overlap_start}'
+            """)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    else:
+        filter_clause = (
+            f"WHERE {date_field} > DATE '{local_max.isoformat()}'"
+            if local_max else ""
+        )
+        conn.execute(f"""
+            INSERT INTO {db_table}
+            SELECT DISTINCT * FROM df
+            {filter_clause}
+        """)
+
     after = conn.execute(f"SELECT COUNT(*) FROM {db_table}").fetchone()[0]
     return after - before
 
@@ -627,16 +665,16 @@ def main():
         epilog="""
 Examples:
   # Refresh all stale tables
-  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb
+  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb
 
   # Check only (show what would update)
-  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb --check-only
+  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --check-only
 
   # Refresh just metrics and tickers
-  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb --tables METRICS TICKERS
+  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --tables METRICS TICKERS
 
   # Force re-download (ignore staleness check)
-  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-flow.duckdb --tables SF3 --force
+  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --tables SF3 --force
 """,
     )
     parser.add_argument("--db", required=True, help="Path to DuckDB database")

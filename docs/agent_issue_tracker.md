@@ -1,6 +1,6 @@
 # Agent Issue Tracker
 
-Last updated: 2026-05-26
+Last updated: 2026-05-31
 
 This tracker captures review findings for the project base code. Use each entry to define the problem, implement the fix, record verification steps, and note final results.
 
@@ -37,17 +37,30 @@ Validation result: Passed. `compileall` completed successfully; pytest reported 
 
 ## AIT-002: Same-Date Incremental Updates Are Dropped
 
-Status: Open
+Status: Fixed
 
 Problem: Tables using `date_field.gte` download rows for the local max date, but insertion filters with `WHERE date_field > local_max`. Same-date corrections are skipped, and `--force` still does not reconcile existing max-date rows.
 
 Fix plan: Add table-specific natural keys and perform an upsert, or delete and reload a bounded overlap window such as `local_max - N days` through the latest API date inside a transaction.
 
-Implementation notes: Not implemented.
+Implementation notes: Implemented on 2026-05-31. Incremental `use_gte` tables now treat the local max date as an overlap window during freshness checks. When existing data is present, the write path deletes rows at or after the local max date and inserts the downloaded replacement rows inside a transaction, so same-date corrections are reconciled instead of filtered out. Non-`use_gte` tables still append rows strictly newer than the local max date.
+
+Files changed:
+- `scripts/pipeline/sharadar_data_sync.py`
+- `scripts/pipeline/full_sharadar_refresh.py`
+- `tests/test_incremental_overlap.py`
 
 Test plan: Seed a DuckDB test table with a max-date row, mock an API response containing a corrected row for that same date, run sync, and verify the stored row changes.
 
-Result: Not tested after fix.
+Evidence: Added focused tests for the daily sync and full refresh entrypoints. Each test seeds a max-date row, mocks the API check/download response with a corrected row for that same date, runs the normal non-force sync path, and verifies the stored value is updated without duplicating the row. The tests also assert the API check uses the overlap date rather than `local_max + 1`.
+
+Validation command:
+- `python -m compileall scripts`
+- `conda run -n kairos-gpu python -m pytest tests/test_incremental_overlap.py`
+- `conda run -n kairos-gpu python -m pytest tests`
+- `git diff --check`
+
+Validation result: Passed. `compileall` completed successfully; the focused overlap tests reported `2 passed`; the full test suite reported `5 passed`; `git diff --check` produced no whitespace errors.
 
 ## AIT-003: API Keys May Leak Through Logged Request Errors
 
@@ -103,14 +116,26 @@ Validation result: Passed. `compileall` completed successfully; pytest reported 
 
 ## AIT-006: Help Text Still References `kairos-flow.duckdb`
 
-Status: Open
+Status: Fixed
 
 Problem: Some script docstrings and argparse examples still use `data/kairos-flow.duckdb`, which is the original DB name this reset is intended to avoid.
 
 Fix plan: Update script examples to use `data/kairos-fastai.duckdb` consistently.
 
-Implementation notes: Not implemented.
+Implementation notes: Implemented on 2026-05-31. Updated the stale argparse examples and full-refresh module usage examples to reference `data/kairos-fastai.duckdb` consistently. Also corrected the daily sync help examples to use the current `scripts/pipeline/sharadar_data_sync.py` path.
+
+Files changed:
+- `scripts/pipeline/sharadar_data_sync.py`
+- `scripts/pipeline/full_sharadar_refresh.py`
 
 Test plan: Run `python scripts/pipeline/sharadar_data_sync.py --help` and `python scripts/pipeline/full_sharadar_refresh.py --help`; verify no examples reference `kairos-flow.duckdb`.
 
-Result: Not tested after fix.
+Evidence: Both help outputs now show `data/kairos-fastai.duckdb` in their examples. A focused search of the two pipeline entrypoints found no remaining `kairos-flow.duckdb` references.
+
+Validation command:
+- `python -m compileall scripts`
+- `conda run -n kairos-gpu python scripts/pipeline/sharadar_data_sync.py --help`
+- `conda run -n kairos-gpu python scripts/pipeline/full_sharadar_refresh.py --help`
+- `rg -n "kairos-flow\\.duckdb" scripts/pipeline/sharadar_data_sync.py scripts/pipeline/full_sharadar_refresh.py`
+
+Validation result: Passed. `compileall` completed successfully; both help commands rendered with `data/kairos-fastai.duckdb`; `rg` found no stale `kairos-flow.duckdb` references in the relevant entrypoints.
