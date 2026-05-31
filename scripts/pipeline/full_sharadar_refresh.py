@@ -56,6 +56,7 @@ import argparse
 import io
 import logging
 import os
+import re
 import sys
 import uuid
 from datetime import datetime, date, timedelta
@@ -75,6 +76,15 @@ logger = logging.getLogger(__name__)
 API_KEY_ENV = "NASDAQ_DATA_LINK_API_KEY"
 BASE_URL = "https://data.nasdaq.com/api/v3/datatables/SHARADAR"
 PAGE_SAFETY_LIMIT = 500  # ~5M rows max per table per run
+API_KEY_QUERY_RE = re.compile(r"((?:^|[?&\s])api_key=)[^&\s'\"<>)]+")
+API_KEY_DICT_RE = re.compile(r"(['\"]api_key['\"]\s*:\s*['\"])[^'\"]+(['\"])")
+
+
+def redact_api_key(value: object) -> str:
+    """Redact Nasdaq API keys from URL and params-style exception text."""
+    text = str(value)
+    text = API_KEY_QUERY_RE.sub(r"\1<redacted>", text)
+    return API_KEY_DICT_RE.sub(r"\1<redacted>\2", text)
 
 TABLES: Dict[str, Dict] = {
     "SEP": {
@@ -249,7 +259,12 @@ def check_api_for_new_data(
 ) -> Tuple[bool, Optional[date]]:
     """Returns (has_new_data, api_max_date_observed)."""
     date_field = table_config["date_field"]
-    url = f"{BASE_URL}/{table_name}.json?"
+    url = f"{BASE_URL}/{table_name}.json"
+    params = {
+        "qopts.columns": date_field,
+        "qopts.per_page": "100",
+        "api_key": api_key,
+    }
 
     if local_max:
         # use_gte tables intentionally refresh the max-date overlap so
@@ -259,14 +274,10 @@ def check_api_for_new_data(
             if table_config.get("use_gte", False)
             else local_max + timedelta(days=1)
         )
-        url += f"{date_field}.gte={check_date.strftime('%Y-%m-%d')}&"
-
-    url += f"qopts.columns={date_field}&"
-    url += f"qopts.per_page=100&"
-    url += f"api_key={api_key}"
+        params[f"{date_field}.gte"] = check_date.strftime("%Y-%m-%d")
 
     try:
-        resp = requests.get(url, timeout=30)
+        resp = requests.get(url, params=params, timeout=30)
         resp.raise_for_status()
         rows = resp.json().get("datatable", {}).get("data", [])
         if not rows:
@@ -283,7 +294,7 @@ def check_api_for_new_data(
             return False, local_max
         return True, api_max
     except Exception as e:
-        logger.warning(f"  Error checking API for {table_name}: {e}")
+        logger.warning(f"  Error checking API for {table_name}: {redact_api_key(e)}")
         return False, None
 
 
@@ -298,14 +309,14 @@ def download_paginated(
     use_gte = table_config.get("use_gte", False)
     date_columns = table_config.get("date_columns", [])
 
-    base_url = f"{BASE_URL}/{table_name}.csv?"
+    base_url = f"{BASE_URL}/{table_name}.csv"
+    base_params = {"api_key": api_key}
     if since_date is not None:
         if use_gte:
-            base_url += f"{date_field}.gte={since_date.strftime('%Y-%m-%d')}&"
+            base_params[f"{date_field}.gte"] = since_date.strftime("%Y-%m-%d")
         else:
             next_date = since_date + timedelta(days=1)
-            base_url += f"{date_field}.gte={next_date.strftime('%Y-%m-%d')}&"
-    base_url += f"api_key={api_key}"
+            base_params[f"{date_field}.gte"] = next_date.strftime("%Y-%m-%d")
 
     logger.info(f"  Downloading {table_name} (paginated)...")
 
@@ -316,8 +327,10 @@ def download_paginated(
 
     try:
         while True:
-            url = f"{base_url}&qopts.cursor_id={cursor_id}" if cursor_id else base_url
-            resp = requests.get(url, timeout=180)
+            params = base_params.copy()
+            if cursor_id:
+                params["qopts.cursor_id"] = cursor_id
+            resp = requests.get(base_url, params=params, timeout=180)
             resp.raise_for_status()
 
             csv_content = resp.text
@@ -341,8 +354,8 @@ def download_paginated(
                 break
 
             # Get next cursor via JSON endpoint
-            json_url = url.replace(".csv?", ".json?")
-            json_resp = requests.get(json_url, timeout=60)
+            json_url = f"{BASE_URL}/{table_name}.json"
+            json_resp = requests.get(json_url, params=params, timeout=60)
             json_resp.raise_for_status()
             cursor_id = json_resp.json().get("meta", {}).get("next_cursor_id")
             if not cursor_id:
@@ -364,9 +377,7 @@ def download_paginated(
         logger.info(f"  Total: {len(df):,} rows across {page} page(s)")
         return df
     except Exception as e:
-        logger.error(f"  Download failed: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"  Download failed: {redact_api_key(e)}")
         return None
 
 

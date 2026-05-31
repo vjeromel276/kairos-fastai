@@ -64,17 +64,32 @@ Validation result: Passed. `compileall` completed successfully; the focused over
 
 ## AIT-003: API Keys May Leak Through Logged Request Errors
 
-Status: Partially mitigated
+Status: Fixed
 
 Problem: API URLs are built with `api_key=` in the query string. Logged exceptions from `requests` can include the full URL, exposing secrets in logs or console output.
 
 Fix plan: Use `requests.get(..., params=...)` and add a small redaction helper for any URL or exception text before logging. Keep `.env` ignored.
 
-Implementation notes: `.gitignore` now includes `.env`. URL redaction is not implemented.
+Implementation notes: Implemented on 2026-05-31. Pipeline API requests now pass the Nasdaq key through `requests.get(..., params=...)` instead of appending `api_key=` to constructed URLs. Added a redaction helper in both pipeline entrypoints for URL-style and params-dict-style exception text, and request failure logging now emits redacted messages without printing raw tracebacks that could repeat secret-bearing exception strings. `.gitignore` already ignored `.env`.
+
+Files changed:
+- `scripts/pipeline/sharadar_data_sync.py`
+- `scripts/pipeline/full_sharadar_refresh.py`
+- `tests/test_api_key_redaction.py`
+- `tests/test_incremental_overlap.py`
+- `tests/test_pagination_safety.py`
 
 Test plan: Unit test the redaction helper with URLs containing `api_key=secret`. Force a mocked request failure and verify logs do not contain the raw key.
 
-Result: `.env` ignore verified by inspection; log redaction not tested after fix.
+Evidence: Added focused redaction tests for both pipeline entrypoints. The tests verify URL and params-dict API key redaction, then force mocked request failures whose exception text contains the raw key in both forms and assert captured logs contain `<redacted>` without the secret. Existing request-mocking tests were updated to assert API filters are passed through `params`.
+
+Validation command:
+- `python -m compileall scripts`
+- `conda run -n kairos-gpu python -m pytest tests/test_api_key_redaction.py`
+- `conda run -n kairos-gpu python -m pytest tests`
+- `git diff --check`
+
+Validation result: Passed. `compileall` completed successfully; the focused API-key redaction tests reported `4 passed`; the full test suite reported `10 passed`; `git diff --check` produced no whitespace errors.
 
 ## AIT-004: Full-Reload Tables Can Miss Deletions Or Corrections
 

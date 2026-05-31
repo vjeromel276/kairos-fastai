@@ -42,11 +42,11 @@ def test_daily_sync_refreshes_same_date_gte_correction(monkeypatch, tmp_path) ->
         "sharadar_data_sync_overlap_under_test",
         "scripts/pipeline/sharadar_data_sync.py",
     )
-    requested_urls: list[str] = []
+    requested_params: list[dict] = []
 
-    def fake_get(url: str, timeout: int) -> FakeResponse:
-        requested_urls.append(url)
-        if ".json?" in url:
+    def fake_get(url: str, params: dict | None = None, timeout: int = 0) -> FakeResponse:
+        requested_params.append(params or {})
+        if url.endswith(".json"):
             return FakeResponse(
                 json_data={"datatable": {"data": [["2026-01-02"]]}},
                 content_type="application/json",
@@ -96,8 +96,8 @@ def test_daily_sync_refreshes_same_date_gte_correction(monkeypatch, tmp_path) ->
 
     assert result["status"] == "updated"
     assert rows == [("AAPL", date(2026, 1, 2), 200)]
-    assert any("lastupdated.gte=2026-01-02" in url for url in requested_urls)
-    assert not any("lastupdated.gte=2026-01-03" in url for url in requested_urls)
+    assert any(params.get("lastupdated.gte") == "2026-01-02" for params in requested_params)
+    assert not any(params.get("lastupdated.gte") == "2026-01-03" for params in requested_params)
 
 
 def test_full_refresh_refreshes_same_date_gte_correction(monkeypatch, tmp_path) -> None:
@@ -105,11 +105,11 @@ def test_full_refresh_refreshes_same_date_gte_correction(monkeypatch, tmp_path) 
         "full_sharadar_refresh_overlap_under_test",
         "scripts/pipeline/full_sharadar_refresh.py",
     )
-    requested_urls: list[str] = []
+    requested_params: list[dict] = []
 
-    def fake_get(url: str, timeout: int) -> FakeResponse:
-        requested_urls.append(url)
-        if ".json?" in url:
+    def fake_get(url: str, params: dict | None = None, timeout: int = 0) -> FakeResponse:
+        requested_params.append(params or {})
+        if url.endswith(".json"):
             return FakeResponse(
                 json_data={"datatable": {"data": [["2026-01-02"]]}},
                 content_type="application/json",
@@ -156,5 +156,5 @@ def test_full_refresh_refreshes_same_date_gte_correction(monkeypatch, tmp_path) 
 
     assert result["status"] == "updated"
     assert rows == [("AAPL", date(2026, 1, 2), 200)]
-    assert any("lastupdated.gte=2026-01-02" in url for url in requested_urls)
-    assert not any("lastupdated.gte=2026-01-03" in url for url in requested_urls)
+    assert any(params.get("lastupdated.gte") == "2026-01-02" for params in requested_params)
+    assert not any(params.get("lastupdated.gte") == "2026-01-03" for params in requested_params)

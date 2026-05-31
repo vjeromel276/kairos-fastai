@@ -40,6 +40,7 @@ Environment:
 import argparse
 import logging
 import os
+import re
 import sys
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, List, Tuple
@@ -60,6 +61,15 @@ logger = logging.getLogger(__name__)
 API_KEY_ENV = "NASDAQ_DATA_LINK_API_KEY"
 BASE_URL = "https://data.nasdaq.com/api/v3/datatables/SHARADAR"
 PAGE_SAFETY_LIMIT = 50
+API_KEY_QUERY_RE = re.compile(r"((?:^|[?&\s])api_key=)[^&\s'\"<>)]+")
+API_KEY_DICT_RE = re.compile(r"(['\"]api_key['\"]\s*:\s*['\"])[^'\"]+(['\"])")
+
+
+def redact_api_key(value: object) -> str:
+    """Redact Nasdaq API keys from URL and params-style exception text."""
+    text = str(value)
+    text = API_KEY_QUERY_RE.sub(r"\1<redacted>", text)
+    return API_KEY_DICT_RE.sub(r"\1<redacted>\2", text)
 
 # Table configurations
 TABLES = {
@@ -149,8 +159,12 @@ def check_api_for_new_data(
     """
     date_field = table_config["date_field"]
     
-    # Build URL to check for latest data
-    url = f"{BASE_URL}/{table_name}.json?"
+    url = f"{BASE_URL}/{table_name}.json"
+    params = {
+        "qopts.columns": date_field,
+        "qopts.per_page": "100",
+        "api_key": api_key,
+    }
     
     if local_max:
         # use_gte tables intentionally refresh the max-date overlap so
@@ -160,14 +174,10 @@ def check_api_for_new_data(
             if table_config.get("use_gte", False)
             else local_max + timedelta(days=1)
         )
-        url += f"{date_field}.gte={check_date.strftime('%Y-%m-%d')}&"
-    
-    url += f"qopts.columns={date_field}&"
-    url += f"qopts.per_page=100&"
-    url += f"api_key={api_key}"
+        params[f"{date_field}.gte"] = check_date.strftime("%Y-%m-%d")
     
     try:
-        resp = requests.get(url, timeout=30)
+        resp = requests.get(url, params=params, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         
@@ -193,7 +203,7 @@ def check_api_for_new_data(
         return True, api_max, -1
         
     except Exception as e:
-        logger.warning(f"  Error checking API for {table_name}: {e}")
+        logger.warning(f"  Error checking API for {table_name}: {redact_api_key(e)}")
         return False, None, 0
 
 
@@ -211,17 +221,15 @@ def download_new_data_paginated(
     use_gte = table_config.get("use_gte", False)
     date_columns = table_config.get("date_columns", [])
     
-    # Build base URL
-    base_url = f"{BASE_URL}/{table_name}.csv?"
+    base_url = f"{BASE_URL}/{table_name}.csv"
+    base_params = {"api_key": api_key}
     
     if since_date:
         if use_gte:
-            base_url += f"{date_field}.gte={since_date.strftime('%Y-%m-%d')}&"
+            base_params[f"{date_field}.gte"] = since_date.strftime("%Y-%m-%d")
         else:
             next_date = since_date + timedelta(days=1)
-            base_url += f"{date_field}.gte={next_date.strftime('%Y-%m-%d')}&"
-    
-    base_url += f"api_key={api_key}"
+            base_params[f"{date_field}.gte"] = next_date.strftime("%Y-%m-%d")
     
     logger.info(f"  Downloading {table_name} data (with pagination)...")
     
@@ -232,14 +240,12 @@ def download_new_data_paginated(
     
     try:
         while True:
-            # Build URL with cursor if we have one
+            params = base_params.copy()
             if cursor_id:
-                url = f"{base_url}&qopts.cursor_id={cursor_id}"
-            else:
-                url = base_url
+                params["qopts.cursor_id"] = cursor_id
             
             # Download this page
-            resp = requests.get(url, timeout=120)
+            resp = requests.get(base_url, params=params, timeout=120)
             resp.raise_for_status()
             
             # Check content type - CSV or JSON error?
@@ -280,8 +286,8 @@ def download_new_data_paginated(
                 break
             
             # Switch to JSON to get cursor_id
-            json_url = url.replace('.csv?', '.json?')
-            json_resp = requests.get(json_url, timeout=60)
+            json_url = f"{BASE_URL}/{table_name}.json"
+            json_resp = requests.get(json_url, params=params, timeout=60)
             json_resp.raise_for_status()
             json_data = json_resp.json()
             
@@ -309,9 +315,7 @@ def download_new_data_paginated(
         return df
         
     except Exception as e:
-        logger.error(f"  Download failed: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"  Download failed: {redact_api_key(e)}")
         return None
 
 

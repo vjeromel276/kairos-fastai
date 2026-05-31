@@ -43,8 +43,8 @@ def full_page_csv(header: str, row_template: str, row_count: int = 10000) -> str
 
 
 def always_more_pages(csv_text: str):
-    def fake_get(url: str, timeout: int) -> FakeResponse:
-        if ".json?" in url:
+    def fake_get(url: str, params: dict | None = None, timeout: int = 0) -> FakeResponse:
+        if url.endswith(".json"):
             return FakeResponse(
                 json_data={"meta": {"next_cursor_id": "still-more"}},
                 content_type="application/json",
