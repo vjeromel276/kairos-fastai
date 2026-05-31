@@ -503,12 +503,16 @@ def refresh_table(
     logger.info(f"{'='*60}")
 
     no_date = table_config.get("no_date_field", False)
-    if no_date:
-        # Reference table with no date column — always treat as needing reload.
-        logger.info(f"  No date field; will full-reload on demand")
-        local_max = None
+    if mode == "full":
+        if no_date:
+            local_max = None
+            logger.info(f"  No date field; will full-reload when selected")
+        else:
+            local_max = get_local_max_date(conn, table_config)
+            logger.info(f"  Local max {table_config['db_date_field']}: {local_max or 'No data'}")
         api_max = None
         has_new = True
+        logger.info(f"  Full-reload table; skipping incremental staleness check")
     else:
         local_max = get_local_max_date(conn, table_config)
         logger.info(f"  Local max {table_config['db_date_field']}: {local_max or 'No data'}")
@@ -529,6 +533,8 @@ def refresh_table(
 
     if force:
         logger.info(f"  Force download requested")
+    elif mode == "full":
+        logger.info(f"  Full reload scheduled")
     else:
         logger.info(f"  New data available")
 

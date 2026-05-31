@@ -78,17 +78,29 @@ Result: `.env` ignore verified by inspection; log redaction not tested after fix
 
 ## AIT-004: Full-Reload Tables Can Miss Deletions Or Corrections
 
-Status: Open
+Status: Fixed
 
 Problem: Full-reload tables are still skipped when the incremental staleness check finds no newer date. This can miss deletions or snapshot corrections in tables such as `TICKERS` unless `--force` is used manually.
 
 Fix plan: For `reload_mode = "full"`, reload on the normal full-refresh path or add a separate freshness policy that does not rely only on max date.
 
-Implementation notes: Not implemented.
+Implementation notes: Implemented on 2026-05-31. `full_sharadar_refresh.py` now treats `reload_mode = "full"` tables as full-reload work whenever they are selected, instead of gating them on an incremental max-date API check. Date-bearing full-reload tables still report the local max date for visibility, and no-date reference tables keep the existing full-reload behavior.
+
+Files changed:
+- `scripts/pipeline/full_sharadar_refresh.py`
+- `tests/test_full_reload_policy.py`
 
 Test plan: Mock a full table with the same max date but changed/deleted rows. Verify the refresh replaces local contents without requiring `--force`.
 
-Result: Not tested after fix.
+Evidence: Added a focused TICKERS regression test that seeds two local rows at the current max date, mocks a replacement download with the same max date containing one corrected row, runs `refresh_table()` without `--force`, and verifies the local table is replaced so the deleted row is removed and the corrected row remains.
+
+Validation command:
+- `python -m compileall scripts`
+- `conda run -n kairos-gpu python -m pytest tests/test_full_reload_policy.py`
+- `conda run -n kairos-gpu python -m pytest tests`
+- `git diff --check`
+
+Validation result: Passed. `compileall` completed successfully; the focused full-reload policy test reported `1 passed`; the full test suite reported `6 passed`; `git diff --check` produced no whitespace errors.
 
 ## AIT-005: Full Replacement Is Not Atomic
 
