@@ -44,6 +44,8 @@ def full_page_csv(header: str, row_template: str, row_count: int = 10000) -> str
 
 def always_more_pages(csv_text: str):
     def fake_get(url: str, params: dict | None = None, timeout: int = 0) -> FakeResponse:
+        assert params is not None
+        assert params["qopts.per_page"] == "10000"
         if url.endswith(".json"):
             return FakeResponse(
                 json_data={"meta": {"next_cursor_id": "still-more"}},

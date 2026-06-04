@@ -46,12 +46,29 @@ def test_full_reload_replaces_same_max_date_changes_without_force(
         monkeypatch.setattr(
             module,
             "check_api_for_new_data",
-            lambda *args, **kwargs: (False, date(2026, 1, 2)),
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("full reload should not use incremental API check")
+            ),
         )
+
+        def fake_replace_full_from_bulk_export(
+            conn_arg,
+            table_name,
+            table_config,
+            api_key,
+            download_root,
+            keep_downloads=False,
+            poll_seconds=0,
+            max_attempts=0,
+        ):
+            assert table_name == "TICKERS"
+            assert api_key == "test-key"
+            return module.replace_full(conn_arg, replacement, table_config)
+
         monkeypatch.setattr(
             module,
-            "download_paginated",
-            lambda table_name, table_config, since_date, api_key: replacement,
+            "replace_full_from_bulk_export",
+            fake_replace_full_from_bulk_export,
         )
 
         result = module.refresh_table(

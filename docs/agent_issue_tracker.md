@@ -166,3 +166,86 @@ Validation command:
 - `rg -n "kairos-flow\\.duckdb" scripts/pipeline/sharadar_data_sync.py scripts/pipeline/full_sharadar_refresh.py`
 
 Validation result: Passed. `compileall` completed successfully; both help commands rendered with `data/kairos-fastai.duckdb`; `rg` found no stale `kairos-flow.duckdb` references in the relevant entrypoints.
+
+## AIT-007: Paginated Downloads Do Not Request 10,000-Row Pages
+
+Status: Fixed
+
+Problem: The download loops stop when a CSV page has fewer than 10,000 rows, but the CSV download requests do not set `qopts.per_page=10000`. If the Nasdaq Data Link API default page size is lower than 10,000, large downloads can still truncate after the first default-sized page because the scripts treat that short page as the final page.
+
+Fix plan: Add `qopts.per_page=10000` to the CSV download params in both pipeline entrypoints. Keep cursor requests using the same page size and add focused tests that assert the download request sends `qopts.per_page=10000`.
+
+Implementation notes: Implemented on 2026-05-31. Both pipeline download functions now include `qopts.per_page=10000` in the base CSV request params, and cursor metadata requests reuse those params so the expected page size stays consistent across paginated calls.
+
+Files changed:
+- `scripts/pipeline/sharadar_data_sync.py`
+- `scripts/pipeline/full_sharadar_refresh.py`
+- `tests/test_pagination_safety.py`
+
+Test plan: Mock CSV and cursor API calls for both `sharadar_data_sync.py` and `full_sharadar_refresh.py`; verify the CSV request params include `qopts.per_page=10000` and pagination behavior still reaches the safety-limit failure path when cursors continue.
+
+Evidence: Tightened the existing mocked pagination-safety helper to assert every CSV and JSON cursor request includes `qopts.per_page=10000`. The existing two-page safety-limit tests still verify both entrypoints fail closed instead of creating or replacing tables with partial data.
+
+Validation command:
+- `python -m compileall scripts`
+- `conda run -n kairos-gpu python -m pytest tests/test_pagination_safety.py`
+- `conda run -n kairos-gpu python -m pytest tests`
+- `git diff --check`
+
+Validation result: Passed. `compileall` completed successfully; the focused pagination tests reported `2 passed`; the full test suite reported `10 passed`; `git diff --check` produced no whitespace errors.
+
+## AIT-008: Daily Sync Can Leave `trading_calendar` Stale
+
+Status: Open
+
+Problem: The local audit on 2026-05-31 showed `sep_base` through `2026-05-29` but `trading_calendar` only through `2026-05-22`, missing `2026-05-26` through `2026-05-29`. `full_sharadar_refresh.py` refreshes `trading_calendar`, but `sharadar_data_sync.py` can update `SEP` without refreshing or warning about the calendar.
+
+Fix plan: Rebuild `trading_calendar` after a successful `SEP` update in `sharadar_data_sync.py`, or add a shared calendar refresh helper used by both pipeline entrypoints. Keep check-only mode non-mutating.
+
+Implementation notes: Not implemented.
+
+Test plan: Seed a DuckDB test database with `sep_base` dates newer than `trading_calendar`, mock a successful `SEP` sync, run the daily sync path, and verify `trading_calendar` is rebuilt through the latest `sep_base.date`. Also verify `--check-only` does not mutate the calendar.
+
+Result: Not tested after fix.
+
+## AIT-009: `SFP` Is Refreshable But Not Preserved Or Audited
+
+Status: Open
+
+Problem: `full_sharadar_refresh.py` supports the opt-in `SFP` table as local table `sfp`, but reset tooling does not include `sfp` in the source-table keep/audit lists. If `SFP` is ever refreshed, `prune_to_source_tables.py` will classify it as droppable, and `audit_source_db.py` will not report its state.
+
+Fix plan: Add `sfp` to the reset keep list and audit table lists, with date/entity metadata matching the refresh configuration.
+
+Implementation notes: Not implemented.
+
+Test plan: Run the prune dry-run against a database containing `sfp` and verify it is kept. Run the audit command and verify `sfp` appears with row counts, date range, and distinct ticker count.
+
+Result: Not tested after fix.
+
+## AIT-010: Full Refresh Should Use Bulk Export And Local Ingestion
+
+Status: Fixed
+
+Problem: Full-reload tables can exceed practical cursor-pagination limits and should not be downloaded into one in-memory DataFrame. Large full refreshes need a two-phase flow that downloads the complete source file first, then ingests into DuckDB staging and atomically replaces the target table only after the download and validation succeed.
+
+Fix plan: Route `reload_mode = "full"` tables in `full_sharadar_refresh.py` through Nasdaq Data Link bulk export (`qopts.export=true`). Download the fresh zipped CSV to a per-run local directory, extract the CSV, load it into a temporary DuckDB staging table, atomically replace the production table from staging, and delete downloaded files after successful ingestion. Keep incremental tables on paginated API sync.
+
+Implementation notes: Implemented on 2026-05-31. Added bulk export polling, streamed zip download, safe single-CSV extraction, CSV staging through DuckDB, atomic full-table replacement from staging, success-only cleanup, and CLI controls for download directory, keeping downloads, poll interval, and max poll attempts. Failed full-refresh bulk runs leave downloaded files in place for inspection or manual re-ingestion.
+
+Files changed:
+- `scripts/pipeline/full_sharadar_refresh.py`
+- `tests/test_bulk_full_refresh.py`
+- `tests/test_full_reload_policy.py`
+
+Test plan: Mock a fresh bulk export response with a zipped CSV, verify `full_sharadar_refresh.py` requests `qopts.export=true`, downloads the zip, stages the CSV, atomically replaces `tickers`, and deletes the temporary download directory after success. Verify full-reload scheduling still skips incremental staleness checks and no longer depends on `download_paginated()`.
+
+Evidence: Added a focused bulk full-refresh test that mocks the exporter status response and zip download, ingests a replacement `TICKERS` CSV from disk through DuckDB staging, verifies the table contents are atomically replaced, and confirms downloaded files are removed on success. Updated the full-reload policy test so it asserts full reloads do not call the incremental API check and use the bulk replacement hook.
+
+Validation command:
+- `python -m compileall scripts`
+- `conda run -n kairos-gpu python -m pytest tests/test_bulk_full_refresh.py tests/test_full_reload_policy.py tests/test_full_replace_atomic.py`
+- `conda run -n kairos-gpu python -m pytest tests`
+- `conda run -n kairos-gpu python scripts/pipeline/full_sharadar_refresh.py --help`
+- `git diff --check`
+
+Validation result: Passed. `compileall` completed successfully; focused full-refresh tests reported `3 passed`; the full test suite reported `11 passed`; help output rendered the new bulk export flags; `git diff --check` produced no whitespace errors.

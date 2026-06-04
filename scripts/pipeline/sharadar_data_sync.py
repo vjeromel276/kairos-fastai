@@ -222,7 +222,7 @@ def download_new_data_paginated(
     date_columns = table_config.get("date_columns", [])
     
     base_url = f"{BASE_URL}/{table_name}.csv"
-    base_params = {"api_key": api_key}
+    base_params = {"api_key": api_key, "qopts.per_page": "10000"}
     
     if since_date:
         if use_gte:

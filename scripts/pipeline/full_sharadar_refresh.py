@@ -57,10 +57,14 @@ import io
 import logging
 import os
 import re
+import shutil
 import sys
+import time
 import uuid
 from datetime import datetime, date, timedelta
+from pathlib import Path
 from typing import Optional, Dict, List, Tuple
+import zipfile
 
 import duckdb
 import pandas as pd
@@ -76,6 +80,9 @@ logger = logging.getLogger(__name__)
 API_KEY_ENV = "NASDAQ_DATA_LINK_API_KEY"
 BASE_URL = "https://data.nasdaq.com/api/v3/datatables/SHARADAR"
 PAGE_SAFETY_LIMIT = 500  # ~5M rows max per table per run
+BULK_EXPORT_POLL_SECONDS = 30.0
+BULK_EXPORT_MAX_ATTEMPTS = 60
+DEFAULT_BULK_DOWNLOAD_DIR = Path("data/downloads/full_refresh")
 API_KEY_QUERY_RE = re.compile(r"((?:^|[?&\s])api_key=)[^&\s'\"<>)]+")
 API_KEY_DICT_RE = re.compile(r"(['\"]api_key['\"]\s*:\s*['\"])[^'\"]+(['\"])")
 
@@ -310,7 +317,7 @@ def download_paginated(
     date_columns = table_config.get("date_columns", [])
 
     base_url = f"{BASE_URL}/{table_name}.csv"
-    base_params = {"api_key": api_key}
+    base_params = {"api_key": api_key, "qopts.per_page": "10000"}
     if since_date is not None:
         if use_gte:
             base_params[f"{date_field}.gte"] = since_date.strftime("%Y-%m-%d")
@@ -379,6 +386,102 @@ def download_paginated(
     except Exception as e:
         logger.error(f"  Download failed: {redact_api_key(e)}")
         return None
+
+
+def sql_literal(value: Path) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def write_response_to_file(resp, output_path: Path) -> None:
+    with output_path.open("wb") as f:
+        if hasattr(resp, "iter_content"):
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+        else:
+            f.write(resp.content)
+
+
+def download_bulk_export_zip(
+    table_name: str,
+    api_key: str,
+    download_root: Path,
+    poll_seconds: float = BULK_EXPORT_POLL_SECONDS,
+    max_attempts: int = BULK_EXPORT_MAX_ATTEMPTS,
+) -> Path:
+    """Request Nasdaq bulk export and download the fresh zipped CSV file."""
+    run_id = f"{datetime.utcnow():%Y%m%dT%H%M%SZ}_{table_name.lower()}_{uuid.uuid4().hex[:8]}"
+    run_dir = download_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+
+    export_url = f"{BASE_URL}/{table_name}.json"
+    export_params = {"api_key": api_key, "qopts.export": "true"}
+    zip_path = run_dir / f"{table_name.lower()}_bulk.zip"
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = requests.get(export_url, params=export_params, timeout=60)
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as e:
+            raise RuntimeError(
+                f"Bulk export status request failed for {table_name}: {redact_api_key(e)}"
+            ) from e
+
+        bulk = payload.get("datatable_bulk_download", {})
+        file_info = bulk.get("file", {}) or {}
+        status = str(file_info.get("status") or "").lower()
+        link = file_info.get("link")
+        logger.info(f"  Bulk export status for {table_name}: {status or 'unknown'}")
+
+        if status == "fresh" and link:
+            try:
+                download_resp = requests.get(link, timeout=600, stream=True)
+                download_resp.raise_for_status()
+                write_response_to_file(download_resp, zip_path)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Bulk export download failed for {table_name}: {redact_api_key(e)}"
+                ) from e
+
+            if zip_path.stat().st_size == 0:
+                raise RuntimeError(f"Bulk export download for {table_name} produced an empty file")
+            logger.info(f"  Downloaded bulk export to {zip_path}")
+            return zip_path
+
+        if attempt < max_attempts:
+            time.sleep(poll_seconds)
+
+    raise RuntimeError(
+        f"Bulk export for {table_name} was not fresh after {max_attempts} attempt(s)"
+    )
+
+
+def extract_bulk_csv(zip_path: Path) -> Path:
+    """Extract the single CSV from a Nasdaq bulk export zip."""
+    if not zipfile.is_zipfile(zip_path):
+        raise RuntimeError(f"Bulk export file is not a zip archive: {zip_path}")
+
+    extract_dir = zip_path.parent / "extracted"
+    extract_dir.mkdir(exist_ok=False)
+
+    with zipfile.ZipFile(zip_path) as zf:
+        csv_members = [
+            member
+            for member in zf.namelist()
+            if not member.endswith("/") and member.lower().endswith(".csv")
+        ]
+        if len(csv_members) != 1:
+            raise RuntimeError(
+                f"Expected exactly one CSV in {zip_path}, found {len(csv_members)}"
+            )
+        csv_path = extract_dir / Path(csv_members[0]).name
+        with zf.open(csv_members[0]) as src, csv_path.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+
+    if not csv_path.exists():
+        raise RuntimeError(f"Bulk export CSV was not extracted: {csv_path}")
+    return csv_path
 
 
 def insert_incremental(
@@ -488,6 +591,94 @@ def replace_full(
             conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
 
 
+def replace_full_from_staging_table(
+    conn: duckdb.DuckDBPyConnection,
+    staging_table: str,
+    table_config: Dict,
+) -> Tuple[int, int]:
+    """Atomically replace a full-reload table from a validated staging table."""
+    db_table = table_config["db_table"]
+    tables = conn.execute("SHOW TABLES").fetchdf()["name"].tolist()
+    before = (
+        conn.execute(f"SELECT COUNT(*) FROM {db_table}").fetchone()[0]
+        if db_table in tables else 0
+    )
+    after = conn.execute(f"SELECT COUNT(*) FROM {staging_table}").fetchone()[0]
+    staging_columns = [
+        column[0]
+        for column in conn.execute(f"SELECT * FROM {staging_table} LIMIT 0").description
+    ]
+    if not staging_columns:
+        raise RuntimeError(f"Bulk replacement for {db_table} produced no columns")
+
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        conn.execute(f"DROP TABLE IF EXISTS {db_table}")
+        conn.execute(f"CREATE TABLE {db_table} AS SELECT * FROM {staging_table}")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+    return before, after
+
+
+def replace_full_from_csv(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    table_config: Dict,
+) -> Tuple[int, int]:
+    """Load a bulk-export CSV into staging, then atomically replace the table."""
+    db_table = table_config["db_table"]
+    temp_table = f"tmp_{db_table}_bulk_{uuid.uuid4().hex}"
+    temp_created = False
+    try:
+        conn.execute(f"""
+            CREATE TEMP TABLE {temp_table} AS
+            SELECT * FROM read_csv_auto({sql_literal(csv_path)}, header = true)
+        """)
+        temp_created = True
+        return replace_full_from_staging_table(conn, temp_table, table_config)
+    finally:
+        if temp_created:
+            conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
+
+
+def replace_full_from_bulk_export(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+    table_config: Dict,
+    api_key: str,
+    download_root: Path,
+    keep_downloads: bool = False,
+    poll_seconds: float = BULK_EXPORT_POLL_SECONDS,
+    max_attempts: int = BULK_EXPORT_MAX_ATTEMPTS,
+) -> Tuple[int, int]:
+    """
+    Download a full table via Nasdaq bulk export, ingest from local CSV, and clean up.
+
+    Downloads are deleted only after successful ingestion. Failed runs leave files in
+    place so they can be inspected or ingested manually without another export request.
+    """
+    zip_path = download_bulk_export_zip(
+        table_name,
+        api_key,
+        download_root,
+        poll_seconds=poll_seconds,
+        max_attempts=max_attempts,
+    )
+    run_dir = zip_path.parent
+    success = False
+    try:
+        csv_path = extract_bulk_csv(zip_path)
+        before, after = replace_full_from_csv(conn, csv_path, table_config)
+        success = True
+        return before, after
+    finally:
+        if success and not keep_downloads:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+
 def refresh_table(
     conn: duckdb.DuckDBPyConnection,
     table_name: str,
@@ -495,6 +686,10 @@ def refresh_table(
     api_key: str,
     check_only: bool,
     force: bool,
+    download_root: Path = DEFAULT_BULK_DOWNLOAD_DIR,
+    keep_downloads: bool = False,
+    bulk_poll_seconds: float = BULK_EXPORT_POLL_SECONDS,
+    bulk_max_attempts: int = BULK_EXPORT_MAX_ATTEMPTS,
 ) -> Dict:
     mode = table_config["reload_mode"]
     result = {
@@ -554,22 +749,33 @@ def refresh_table(
         result["status"] = "needs_update"
         return result
 
-    # For full reload, download the entire table (since_date=None).
-    # For incremental, download from local_max forward.
-    since = None if mode == "full" else local_max
-    df = download_paginated(table_name, table_config, since, api_key)
-
-    if df is None:
-        result["status"] = "download_failed"
-        return result
-
     if mode == "full":
-        before, after = replace_full(conn, df, table_config)
+        try:
+            before, after = replace_full_from_bulk_export(
+                conn,
+                table_name,
+                table_config,
+                api_key,
+                download_root,
+                keep_downloads=keep_downloads,
+                poll_seconds=bulk_poll_seconds,
+                max_attempts=bulk_max_attempts,
+            )
+        except Exception as e:
+            logger.error(f"  Bulk full reload failed: {redact_api_key(e)}")
+            result["status"] = "download_failed"
+            return result
         result["rows_before"] = before
         result["rows_after"] = after
         result["rows_added"] = after - before
         logger.info(f"  + Replaced table: {before:,} -> {after:,} rows ({after - before:+,})")
     else:
+        df = download_paginated(table_name, table_config, local_max, api_key)
+
+        if df is None:
+            result["status"] = "download_failed"
+            return result
+
         added = insert_incremental(conn, df, table_config)
         result["rows_added"] = added
         result["rows_after"] = conn.execute(
@@ -710,6 +916,29 @@ Examples:
         action="store_true",
         help="Do not refresh trading_calendar from sep_base after refresh"
     )
+    parser.add_argument(
+        "--download-dir",
+        type=Path,
+        default=DEFAULT_BULK_DOWNLOAD_DIR,
+        help="Directory for temporary full-refresh bulk export downloads",
+    )
+    parser.add_argument(
+        "--keep-downloads",
+        action="store_true",
+        help="Keep full-refresh bulk export files after successful ingestion",
+    )
+    parser.add_argument(
+        "--bulk-poll-seconds",
+        type=float,
+        default=BULK_EXPORT_POLL_SECONDS,
+        help="Seconds to wait between bulk export status checks",
+    )
+    parser.add_argument(
+        "--bulk-max-attempts",
+        type=int,
+        default=BULK_EXPORT_MAX_ATTEMPTS,
+        help="Maximum bulk export status checks before failing",
+    )
 
     args = parser.parse_args()
 
@@ -733,6 +962,10 @@ Examples:
             api_key=api_key,
             check_only=args.check_only,
             force=args.force,
+            download_root=args.download_dir,
+            keep_downloads=args.keep_downloads,
+            bulk_poll_seconds=args.bulk_poll_seconds,
+            bulk_max_attempts=args.bulk_max_attempts,
         )
         results.append(result)
 
