@@ -19,12 +19,19 @@ Tables supported:
 - DAILY: Daily fundamental ratios (date field: date)
 - SF1: Quarterly fundamentals (date field: lastupdated)
 - SF2: Insider transactions (date field: filingdate)
+- METRICS: Daily snapshot metrics (date field: lastupdated)
+- TICKERS: Ticker metadata (full reload)
+- ACTIONS: Corporate actions (date field: date)
+- EVENTS: Corporate event filings (date field: date)
+- SF3/SF3A/SF3B: Institutional holdings (date field: calendardate)
+- SP500: S&P 500 constituent changes (full reload)
+- SFP and INDICATORS are checked by default in --check-only and are opt-in for sync.
 
 Usage:
-    # Check and sync all tables
+    # Check and sync standard package tables
     python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb
     
-    # Check only (don't download)
+    # Check all configured tables, including SFP and INDICATORS, without downloading
     python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --check-only
     
     # Sync specific tables
@@ -38,16 +45,22 @@ Environment:
 """
 
 import argparse
+import io
 import logging
 import os
 import re
+import shutil
 import sys
+import time
+import uuid
 from datetime import datetime, date, timedelta
+from pathlib import Path
 from typing import Optional, Dict, List, Tuple
+import zipfile
+
 import requests
 import pandas as pd
 import duckdb
-import io
 
 # Logging setup
 logging.basicConfig(
@@ -61,6 +74,9 @@ logger = logging.getLogger(__name__)
 API_KEY_ENV = "NASDAQ_DATA_LINK_API_KEY"
 BASE_URL = "https://data.nasdaq.com/api/v3/datatables/SHARADAR"
 PAGE_SAFETY_LIMIT = 50
+BULK_EXPORT_POLL_SECONDS = 30.0
+BULK_EXPORT_MAX_ATTEMPTS = 60
+DEFAULT_BULK_DOWNLOAD_DIR = Path("data/downloads/full_refresh")
 API_KEY_QUERY_RE = re.compile(r"((?:^|[?&\s])api_key=)[^&\s'\"<>)]+")
 API_KEY_DICT_RE = re.compile(r"(['\"]api_key['\"]\s*:\s*['\"])[^'\"]+(['\"])")
 
@@ -72,13 +88,14 @@ def redact_api_key(value: object) -> str:
     return API_KEY_DICT_RE.sub(r"\1<redacted>\2", text)
 
 # Table configurations
-TABLES = {
+TABLES: Dict[str, Dict] = {
     "SEP": {
         "db_table": "sep_base",
         "date_field": "date",           # Field to filter API by
         "db_date_field": "date",        # Field in local DB to check max
         "description": "Daily stock prices",
-        "frequency": "daily",
+        "reload_mode": "incremental",
+        "use_gte": False,
         "date_columns": ["date"],
     },
     "DAILY": {
@@ -86,7 +103,8 @@ TABLES = {
         "date_field": "date",
         "db_date_field": "date",
         "description": "Daily fundamental ratios (PE, PB, PS, EV/EBITDA)",
-        "frequency": "daily",
+        "reload_mode": "incremental",
+        "use_gte": False,
         "date_columns": ["date", "lastupdated"],
     },
     "SF1": {
@@ -94,7 +112,7 @@ TABLES = {
         "date_field": "lastupdated",    # Filter API by lastupdated.gte
         "db_date_field": "lastupdated", # Check max lastupdated locally
         "description": "Quarterly/Annual fundamentals",
-        "frequency": "quarterly",
+        "reload_mode": "incremental",
         "use_gte": True,
         "date_columns": ["datekey", "reportperiod", "lastupdated"],
     },
@@ -103,11 +121,104 @@ TABLES = {
         "date_field": "filingdate",
         "db_date_field": "filingdate",
         "description": "Insider transactions",
-        "frequency": "daily",
+        "reload_mode": "incremental",
         "use_gte": True,
         "date_columns": ["filingdate", "transactiondate"],
     },
+    "SFP": {
+        "db_table": "sfp",
+        "date_field": "date",
+        "db_date_field": "date",
+        "description": "Sharadar Fund Prices (mutual funds, ETFs)",
+        "reload_mode": "incremental",
+        "use_gte": False,
+        "opt_in_only": True,
+        "date_columns": ["date", "lastupdated"],
+    },
+    "METRICS": {
+        "db_table": "sharadar_metrics",
+        "date_field": "lastupdated",
+        "db_date_field": "lastupdated",
+        "description": "Daily snapshot metrics (52w hi/lo, MAs, betas)",
+        "reload_mode": "incremental",
+        "use_gte": True,
+        "date_columns": ["date", "lastupdated"],
+    },
+    "TICKERS": {
+        "db_table": "tickers",
+        "date_field": "lastupdated",
+        "db_date_field": "lastupdated",
+        "description": "Ticker metadata (sector, industry, listings)",
+        "reload_mode": "full",
+        "date_columns": [
+            "lastupdated", "firstadded", "firstpricedate", "lastpricedate",
+            "firstquarter", "lastquarter",
+        ],
+    },
+    "ACTIONS": {
+        "db_table": "sharadar_actions",
+        "date_field": "date",
+        "db_date_field": "date",
+        "description": "Corporate actions (splits, dividends)",
+        "reload_mode": "incremental",
+        "use_gte": False,
+        "date_columns": ["date"],
+    },
+    "EVENTS": {
+        "db_table": "sharadar_events",
+        "date_field": "date",
+        "db_date_field": "date",
+        "description": "Corporate event filings",
+        "reload_mode": "incremental",
+        "use_gte": False,
+        "date_columns": ["date"],
+    },
+    "SF3": {
+        "db_table": "sf3",
+        "date_field": "calendardate",
+        "db_date_field": "calendardate",
+        "description": "Institutional holdings (long form)",
+        "reload_mode": "incremental",
+        "use_gte": False,
+        "date_columns": ["calendardate"],
+    },
+    "SF3A": {
+        "db_table": "sf3a",
+        "date_field": "calendardate",
+        "db_date_field": "calendardate",
+        "description": "Institutional holdings by ticker",
+        "reload_mode": "incremental",
+        "use_gte": False,
+        "date_columns": ["calendardate"],
+    },
+    "SF3B": {
+        "db_table": "sf3b",
+        "date_field": "calendardate",
+        "db_date_field": "calendardate",
+        "description": "Institutional holdings by investor",
+        "reload_mode": "incremental",
+        "use_gte": False,
+        "date_columns": ["calendardate"],
+    },
+    "SP500": {
+        "db_table": "sharadar_sp500",
+        "date_field": "date",
+        "db_date_field": "date",
+        "description": "S&P 500 constituent changes",
+        "reload_mode": "full",
+        "date_columns": ["date"],
+    },
+    "INDICATORS": {
+        "db_table": "sharadar_indicators",
+        "description": "Indicator metadata reference (no date field)",
+        "reload_mode": "full",
+        "no_date_field": True,
+        "opt_in_only": True,
+        "date_columns": [],
+    },
 }
+
+DEFAULT_TABLES = [table for table, cfg in TABLES.items() if not cfg.get("opt_in_only")]
 
 
 def get_api_key() -> str:
@@ -384,6 +495,190 @@ def merge_df_to_db(
     return inserted
 
 
+def sql_literal(value: Path) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def write_response_to_file(resp, output_path: Path) -> None:
+    with output_path.open("wb") as f:
+        if hasattr(resp, "iter_content"):
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+        else:
+            f.write(resp.content)
+
+
+def download_bulk_export_zip(
+    table_name: str,
+    api_key: str,
+    download_root: Path,
+    poll_seconds: float = BULK_EXPORT_POLL_SECONDS,
+    max_attempts: int = BULK_EXPORT_MAX_ATTEMPTS,
+) -> Path:
+    """Request Nasdaq bulk export and download the fresh zipped CSV file."""
+    run_id = f"{datetime.utcnow():%Y%m%dT%H%M%SZ}_{table_name.lower()}_{uuid.uuid4().hex[:8]}"
+    run_dir = download_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+
+    export_url = f"{BASE_URL}/{table_name}.json"
+    export_params = {"api_key": api_key, "qopts.export": "true"}
+    zip_path = run_dir / f"{table_name.lower()}_bulk.zip"
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = requests.get(export_url, params=export_params, timeout=60)
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as e:
+            raise RuntimeError(
+                f"Bulk export status request failed for {table_name}: {redact_api_key(e)}"
+            ) from e
+
+        bulk = payload.get("datatable_bulk_download", {})
+        file_info = bulk.get("file", {}) or {}
+        status = str(file_info.get("status") or "").lower()
+        link = file_info.get("link")
+        logger.info(f"  Bulk export status for {table_name}: {status or 'unknown'}")
+
+        if status == "fresh" and link:
+            try:
+                download_resp = requests.get(link, timeout=600, stream=True)
+                download_resp.raise_for_status()
+                write_response_to_file(download_resp, zip_path)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Bulk export download failed for {table_name}: {redact_api_key(e)}"
+                ) from e
+
+            if zip_path.stat().st_size == 0:
+                raise RuntimeError(f"Bulk export download for {table_name} produced an empty file")
+            logger.info(f"  Downloaded bulk export to {zip_path}")
+            return zip_path
+
+        if attempt < max_attempts:
+            time.sleep(poll_seconds)
+
+    raise RuntimeError(
+        f"Bulk export for {table_name} was not fresh after {max_attempts} attempt(s)"
+    )
+
+
+def extract_bulk_csv(zip_path: Path) -> Path:
+    """Extract the single CSV from a Nasdaq bulk export zip."""
+    if not zipfile.is_zipfile(zip_path):
+        raise RuntimeError(f"Bulk export file is not a zip archive: {zip_path}")
+
+    extract_dir = zip_path.parent / "extracted"
+    extract_dir.mkdir(exist_ok=False)
+
+    with zipfile.ZipFile(zip_path) as zf:
+        csv_members = [
+            member
+            for member in zf.namelist()
+            if not member.endswith("/") and member.lower().endswith(".csv")
+        ]
+        if len(csv_members) != 1:
+            raise RuntimeError(
+                f"Expected exactly one CSV in {zip_path}, found {len(csv_members)}"
+            )
+        csv_path = extract_dir / Path(csv_members[0]).name
+        with zf.open(csv_members[0]) as src, csv_path.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+
+    if not csv_path.exists():
+        raise RuntimeError(f"Bulk export CSV was not extracted: {csv_path}")
+    return csv_path
+
+
+def replace_full_from_staging_table(
+    conn: duckdb.DuckDBPyConnection,
+    staging_table: str,
+    table_config: Dict,
+) -> Tuple[int, int]:
+    """Atomically replace a full-reload table from a validated staging table."""
+    db_table = table_config["db_table"]
+    tables = conn.execute("SHOW TABLES").fetchdf()["name"].tolist()
+    before = (
+        conn.execute(f"SELECT COUNT(*) FROM {db_table}").fetchone()[0]
+        if db_table in tables else 0
+    )
+    after = conn.execute(f"SELECT COUNT(*) FROM {staging_table}").fetchone()[0]
+    staging_columns = [
+        column[0]
+        for column in conn.execute(f"SELECT * FROM {staging_table} LIMIT 0").description
+    ]
+    if not staging_columns:
+        raise RuntimeError(f"Bulk replacement for {db_table} produced no columns")
+
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        conn.execute(f"DROP TABLE IF EXISTS {db_table}")
+        conn.execute(f"CREATE TABLE {db_table} AS SELECT * FROM {staging_table}")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+    return before, after
+
+
+def replace_full_from_csv(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    table_config: Dict,
+) -> Tuple[int, int]:
+    """Load a bulk-export CSV into staging, then atomically replace the table."""
+    db_table = table_config["db_table"]
+    temp_table = f"tmp_{db_table}_bulk_{uuid.uuid4().hex}"
+    temp_created = False
+    try:
+        conn.execute(f"""
+            CREATE TEMP TABLE {temp_table} AS
+            SELECT * FROM read_csv_auto({sql_literal(csv_path)}, header = true)
+        """)
+        temp_created = True
+        return replace_full_from_staging_table(conn, temp_table, table_config)
+    finally:
+        if temp_created:
+            conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
+
+
+def replace_full_from_bulk_export(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+    table_config: Dict,
+    api_key: str,
+    download_root: Path,
+    keep_downloads: bool = False,
+    poll_seconds: float = BULK_EXPORT_POLL_SECONDS,
+    max_attempts: int = BULK_EXPORT_MAX_ATTEMPTS,
+) -> Tuple[int, int]:
+    """
+    Download a full table via Nasdaq bulk export, ingest from local CSV, and clean up.
+
+    Downloads are deleted only after successful ingestion. Failed runs leave files in
+    place so they can be inspected or ingested manually without another export request.
+    """
+    zip_path = download_bulk_export_zip(
+        table_name,
+        api_key,
+        download_root,
+        poll_seconds=poll_seconds,
+        max_attempts=max_attempts,
+    )
+    run_dir = zip_path.parent
+    success = False
+    try:
+        csv_path = extract_bulk_csv(zip_path)
+        before, after = replace_full_from_csv(conn, csv_path, table_config)
+        success = True
+        return before, after
+    finally:
+        if success and not keep_downloads:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+
 def refresh_trading_calendar(
     conn: duckdb.DuckDBPyConnection,
     source_table: str = "sep_base",
@@ -464,35 +759,90 @@ def sync_table(
     table_config: Dict,
     api_key: str,
     check_only: bool = False,
-    force: bool = False
+    force: bool = False,
+    download_root: Path = DEFAULT_BULK_DOWNLOAD_DIR,
+    keep_downloads: bool = False,
+    bulk_poll_seconds: float = BULK_EXPORT_POLL_SECONDS,
+    bulk_max_attempts: int = BULK_EXPORT_MAX_ATTEMPTS,
 ) -> Dict:
     """
     Sync a single table. Returns status dict.
     """
+    mode = table_config.get("reload_mode", "incremental")
     result = {
         "table": table_name,
         "db_table": table_config["db_table"],
+        "mode": mode,
         "local_max": None,
         "api_max": None,
         "has_new_data": False,
+        "rows_before": None,
+        "rows_after": None,
         "rows_added": 0,
         "status": "unknown",
     }
     
     logger.info(f"\n{'='*50}")
-    logger.info(f"{table_name}: {table_config['description']}")
+    logger.info(f"{table_name} [{mode}]: {table_config['description']}")
     logger.info(f"{'='*50}")
     
-    # Get local max date
+    if mode == "full":
+        if table_config.get("no_date_field", False):
+            local_max = None
+            logger.info("  No date field; will full-reload when selected")
+        else:
+            local_max = get_local_max_date(conn, table_config)
+            logger.info(f"  Local max date: {local_max or 'No data'}")
+        result["local_max"] = local_max
+        result["has_new_data"] = True
+        logger.info("  Full-reload table; skipping incremental staleness check")
+
+        if force:
+            logger.info("  Force download requested")
+        else:
+            logger.info("  Full reload scheduled")
+
+        if check_only:
+            logger.info("  (check-only mode, skipping download)")
+            result["status"] = "needs_update"
+            return result
+
+        try:
+            before, after = replace_full_from_bulk_export(
+                conn,
+                table_name,
+                table_config,
+                api_key,
+                download_root,
+                keep_downloads=keep_downloads,
+                poll_seconds=bulk_poll_seconds,
+                max_attempts=bulk_max_attempts,
+            )
+        except Exception as e:
+            logger.error(f"  Bulk full reload failed: {redact_api_key(e)}")
+            result["status"] = "download_failed"
+            return result
+
+        result["rows_before"] = before
+        result["rows_after"] = after
+        result["rows_added"] = after - before
+        logger.info(f"  ✓ Replaced table: {before:,} -> {after:,} rows ({after - before:+,})")
+        result["status"] = "updated"
+        return result
+
     local_max = get_local_max_date(conn, table_config)
     result["local_max"] = local_max
     logger.info(f"  Local max date: {local_max or 'No data'}")
-    
-    # Check API for new data
-    has_new, api_max, est_rows = check_api_for_new_data(table_name, table_config, local_max, api_key)
+
+    has_new, api_max, est_rows = check_api_for_new_data(
+        table_name,
+        table_config,
+        local_max,
+        api_key,
+    )
     result["api_max"] = api_max
     result["has_new_data"] = has_new
-    
+
     if api_max:
         logger.info(f"  API max date: {api_max}")
     
@@ -558,11 +908,16 @@ def print_summary(results: List[Dict]):
         
         local_str = str(r['local_max']) if r['local_max'] else 'None'
         
-        logger.info(f"{status_icon} {r['table']:8} ({r['db_table']:12}) | "
+        logger.info(f"{status_icon} {r['table']:8} [{r['mode']:11}] ({r['db_table']:17}) | "
                    f"Local: {local_str:12} | "
                    f"Status: {r['status']}")
         
-        if r["rows_added"] > 0:
+        if r["mode"] == "full" and r["rows_before"] is not None:
+            logger.info(
+                f"  └─ rows: {r['rows_before']:,} -> {r['rows_after']:,} "
+                f"({r['rows_added']:+,})"
+            )
+        elif r["rows_added"] > 0:
             logger.info(f"  └─ Added {r['rows_added']:,} rows")
     
     logger.info(f"{'='*60}\n")
@@ -574,10 +929,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Check all tables for new data and sync
+  # Check standard package tables for new data and sync
   python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb
   
-  # Check only (show what would be updated)
+  # Check only (show what would be updated, including opt-in tables)
   python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --check-only
   
   # Sync only SEP and DAILY
@@ -593,8 +948,11 @@ Examples:
         "--tables",
         nargs="+",
         choices=list(TABLES.keys()),
-        default=list(TABLES.keys()),
-        help=f"Tables to sync (default: all)"
+        default=None,
+        help=(
+            f"Tables to sync (sync default: {', '.join(DEFAULT_TABLES)}; "
+            f"check-only default: {', '.join(TABLES.keys())})"
+        )
     )
     parser.add_argument(
         "--check-only",
@@ -606,8 +964,36 @@ Examples:
         action="store_true",
         help="Force download even if local data appears up to date"
     )
+    parser.add_argument(
+        "--download-dir",
+        type=Path,
+        default=DEFAULT_BULK_DOWNLOAD_DIR,
+        help="Directory for temporary full-reload bulk export downloads",
+    )
+    parser.add_argument(
+        "--keep-downloads",
+        action="store_true",
+        help="Keep full-reload bulk export files after successful ingestion",
+    )
+    parser.add_argument(
+        "--bulk-poll-seconds",
+        type=float,
+        default=BULK_EXPORT_POLL_SECONDS,
+        help="Seconds to wait between bulk export status checks",
+    )
+    parser.add_argument(
+        "--bulk-max-attempts",
+        type=int,
+        default=BULK_EXPORT_MAX_ATTEMPTS,
+        help="Maximum bulk export status checks before failing",
+    )
     
     args = parser.parse_args()
+    selected_tables = (
+        args.tables
+        if args.tables is not None
+        else list(TABLES.keys()) if args.check_only else DEFAULT_TABLES
+    )
     
     # Get API key
     api_key = get_api_key()
@@ -617,14 +1003,14 @@ Examples:
     logger.info("SHARADAR DATA SYNC v2 (in-memory DataFrame merge)")
     logger.info(f"{'='*60}")
     logger.info(f"Database: {args.db}")
-    logger.info(f"Tables: {', '.join(args.tables)}")
+    logger.info(f"Tables: {', '.join(selected_tables)}")
     logger.info(f"Mode: {'Check only' if args.check_only else 'Sync'}")
     
     conn = duckdb.connect(args.db)
     
     # Sync each table
     results = []
-    for table_name in args.tables:
+    for table_name in selected_tables:
         table_config = TABLES[table_name]
         result = sync_table(
             conn=conn,
@@ -632,12 +1018,16 @@ Examples:
             table_config=table_config,
             api_key=api_key,
             check_only=args.check_only,
-            force=args.force
+            force=args.force,
+            download_root=args.download_dir,
+            keep_downloads=args.keep_downloads,
+            bulk_poll_seconds=args.bulk_poll_seconds,
+            bulk_max_attempts=args.bulk_max_attempts,
         )
         results.append(result)
 
     calendar_result = None
-    if "SEP" in args.tables:
+    if "SEP" in selected_tables:
         sep_result = next((r for r in results if r["table"] == "SEP"), None)
         if sep_result and sep_result["status"] not in ("download_failed", "check_failed"):
             calendar_result = refresh_trading_calendar(conn, check_only=args.check_only)
