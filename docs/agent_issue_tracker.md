@@ -249,3 +249,17 @@ Validation command:
 - `git diff --check`
 
 Validation result: Passed. `compileall` completed successfully; focused full-refresh tests reported `3 passed`; the full test suite reported `11 passed`; help output rendered the new bulk export flags; `git diff --check` produced no whitespace errors.
+
+## AIT-011: Model Builds Need A Source Freshness Gate
+
+Status: Open
+
+Problem: The normal Sharadar sync only updates the core daily subset (`SEP`, `DAILY`, `SF1`, `SF2`). Other model-relevant source tables can remain stale unless `full_sharadar_refresh.py` is run, but full refresh is intended for bootstrap/reset/recovery rather than routine pre-model operation. This increases the chance that feature builds, training runs, evaluations, or backtests use stale source data without an explicit failure or warning.
+
+Feature plan: Add a routine pre-model freshness workflow that checks every source table required by model builds, updates refreshable stale tables through the appropriate non-reset path, refreshes `trading_calendar` when `sep_base` advances, and fails closed when required data is stale beyond an accepted threshold. Keep full-refresh semantics reserved for starting over or rebuilding source tables from scratch.
+
+Implementation notes: Not implemented.
+
+Test plan: Seed a DuckDB test database with a mix of fresh and stale model-required source tables. Mock API freshness responses and downloads, run the new freshness workflow, and verify stale incremental tables are updated, stale full-reload/reference tables are reported or refreshed according to policy, `trading_calendar` is rebuilt when needed, and model execution is blocked when required data remains stale.
+
+Result: Not tested after fix.
