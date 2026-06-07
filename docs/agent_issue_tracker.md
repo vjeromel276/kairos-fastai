@@ -196,17 +196,29 @@ Validation result: Passed. `compileall` completed successfully; the focused pagi
 
 ## AIT-008: Daily Sync Can Leave `trading_calendar` Stale
 
-Status: Open
+Status: Fixed
 
 Problem: The local audit on 2026-05-31 showed `sep_base` through `2026-05-29` but `trading_calendar` only through `2026-05-22`, missing `2026-05-26` through `2026-05-29`. `full_sharadar_refresh.py` refreshes `trading_calendar`, but `sharadar_data_sync.py` can update `SEP` without refreshing or warning about the calendar.
 
 Fix plan: Rebuild `trading_calendar` after a successful `SEP` update in `sharadar_data_sync.py`, or add a shared calendar refresh helper used by both pipeline entrypoints. Keep check-only mode non-mutating.
 
-Implementation notes: Not implemented.
+Implementation notes: Implemented on 2026-06-07. `sharadar_data_sync.py` now checks `trading_calendar` whenever `SEP` is part of the daily sync and the SEP pass did not fail. In normal sync mode it rebuilds the calendar from distinct `sep_base.date` values when row count or max date differs; in `--check-only` mode it reports calendar status without mutating the database.
+
+Files changed:
+- `scripts/pipeline/sharadar_data_sync.py`
+- `tests/test_daily_sync_calendar.py`
 
 Test plan: Seed a DuckDB test database with `sep_base` dates newer than `trading_calendar`, mock a successful `SEP` sync, run the daily sync path, and verify `trading_calendar` is rebuilt through the latest `sep_base.date`. Also verify `--check-only` does not mutate the calendar.
 
-Result: Not tested after fix.
+Evidence: Added focused daily-sync calendar tests. One test seeds `sep_base` and `trading_calendar`, mocks a successful SEP update, runs `main()` for `--tables SEP`, and verifies `trading_calendar` is rebuilt through the new SEP date. A second test seeds a stale calendar, runs the same path in `--check-only` mode, and verifies the calendar remains unchanged.
+
+Validation command:
+- `python -m compileall scripts`
+- `python -m pytest tests/test_daily_sync_calendar.py`
+- `python -m pytest tests`
+- `git diff --check`
+
+Validation result: Passed. `compileall` completed successfully; the focused calendar tests reported `2 passed`; the full test suite reported `13 passed`; `git diff --check` produced no whitespace errors.
 
 ## AIT-009: `SFP` Is Refreshable But Not Preserved Or Audited
 

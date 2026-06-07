@@ -384,6 +384,80 @@ def merge_df_to_db(
     return inserted
 
 
+def refresh_trading_calendar(
+    conn: duckdb.DuckDBPyConnection,
+    source_table: str = "sep_base",
+    calendar_table: str = "trading_calendar",
+    check_only: bool = False,
+) -> Dict:
+    """Refresh trading_calendar from distinct SEP source dates."""
+    result = {
+        "table": calendar_table,
+        "source_table": source_table,
+        "rows_before": 0,
+        "rows_after": 0,
+        "old_max": None,
+        "new_max": None,
+        "status": "unknown",
+    }
+
+    tables = conn.execute("SHOW TABLES").fetchdf()["name"].tolist()
+    if source_table not in tables:
+        logger.warning(f"Trading calendar source table '{source_table}' does not exist")
+        result["status"] = "missing_source"
+        return result
+
+    if calendar_table in tables:
+        before = conn.execute(
+            f"SELECT COUNT(*), MAX(trading_date) FROM {calendar_table}"
+        ).fetchone()
+        result["rows_before"] = before[0]
+        result["old_max"] = before[1]
+
+    after_preview = conn.execute(
+        f"SELECT COUNT(DISTINCT date), MAX(date) FROM {source_table}"
+    ).fetchone()
+    result["rows_after"] = after_preview[0]
+    result["new_max"] = after_preview[1]
+
+    needs_update = (
+        result["rows_before"] != result["rows_after"]
+        or result["old_max"] != result["new_max"]
+    )
+
+    logger.info(f"\n{'='*60}")
+    logger.info("TRADING CALENDAR")
+    logger.info(f"{'='*60}")
+    logger.info(
+        f"  Source {source_table}: {result['rows_after']:,} dates "
+        f"(max {result['new_max']})"
+    )
+
+    if check_only:
+        result["status"] = "needs_update" if needs_update else "up_to_date"
+        logger.info(f"  (check-only mode, status: {result['status']})")
+        return result
+
+    if not needs_update:
+        result["status"] = "up_to_date"
+        logger.info(f"  Already up to date")
+        return result
+
+    conn.execute(f"""
+        CREATE OR REPLACE TABLE {calendar_table} AS
+        SELECT DISTINCT CAST(date AS DATE) AS trading_date
+        FROM {source_table}
+        WHERE date IS NOT NULL
+        ORDER BY trading_date
+    """)
+    result["status"] = "updated"
+    logger.info(
+        f"  Updated {calendar_table}: {result['rows_before']:,} -> "
+        f"{result['rows_after']:,} rows, max {result['old_max']} -> {result['new_max']}"
+    )
+    return result
+
+
 def sync_table(
     conn: duckdb.DuckDBPyConnection,
     table_name: str,
@@ -561,11 +635,28 @@ Examples:
             force=args.force
         )
         results.append(result)
+
+    calendar_result = None
+    if "SEP" in args.tables:
+        sep_result = next((r for r in results if r["table"] == "SEP"), None)
+        if sep_result and sep_result["status"] not in ("download_failed", "check_failed"):
+            calendar_result = refresh_trading_calendar(conn, check_only=args.check_only)
+        else:
+            logger.warning("Skipping trading_calendar refresh because SEP did not sync cleanly")
     
     conn.close()
     
     # Print summary
     print_summary(results)
+    if calendar_result:
+        logger.info(
+            "Calendar: %s | rows %s -> %s | max %s -> %s",
+            calendar_result["status"],
+            calendar_result["rows_before"],
+            calendar_result["rows_after"],
+            calendar_result["old_max"],
+            calendar_result["new_max"],
+        )
     
     # Exit with error if any syncs failed
     failed = any(r["status"] in ("download_failed", "check_failed") for r in results)
