@@ -64,6 +64,14 @@ def table_names(db_path: Path) -> list[str]:
         conn.close()
 
 
+def table_count(db_path: Path, table_name: str) -> int:
+    conn = duckdb.connect(str(db_path))
+    try:
+        return conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+    finally:
+        conn.close()
+
+
 def test_sync_page_limit_failure_exits_nonzero_without_creating_table(
     monkeypatch,
     tmp_path,
@@ -106,6 +114,63 @@ def test_sync_page_limit_failure_exits_nonzero_without_creating_table(
 
     assert module.main() == 1
     assert "sep_base" not in table_names(db_path)
+
+
+def test_sync_page_limit_can_be_raised_for_large_incremental_download(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    module = load_script(
+        "sharadar_data_sync_raised_page_limit_under_test",
+        "scripts/pipeline/sharadar_data_sync.py",
+    )
+    monkeypatch.setattr(module, "PAGE_SAFETY_LIMIT", 2)
+    monkeypatch.setattr(
+        module,
+        "check_api_for_new_data",
+        lambda *args, **kwargs: (True, date(2026, 1, 2), -1),
+    )
+    monkeypatch.setenv(module.API_KEY_ENV, "test-key")
+    csv_pages = [
+        full_page_csv("date,ticker,close", "2026-01-01,A{i},100.0"),
+        full_page_csv("date,ticker,close", "2026-01-02,B{i},101.0"),
+        full_page_csv("date,ticker,close", "2026-01-03,C{i},102.0", row_count=1),
+    ]
+    csv_call_count = 0
+
+    def fake_get(url: str, params: dict | None = None, timeout: int = 0) -> FakeResponse:
+        nonlocal csv_call_count
+        assert params is not None
+        assert params["qopts.per_page"] == "10000"
+        if url.endswith(".json"):
+            return FakeResponse(
+                json_data={"meta": {"next_cursor_id": f"cursor-{csv_call_count}"}},
+                content_type="application/json",
+            )
+        response = FakeResponse(text=csv_pages[csv_call_count])
+        csv_call_count += 1
+        return response
+
+    monkeypatch.setattr(module.requests, "get", fake_get)
+
+    db_path = tmp_path / "sync-raised-limit.duckdb"
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        [
+            "sharadar_data_sync.py",
+            "--db",
+            str(db_path),
+            "--tables",
+            "SEP",
+            "--force",
+            "--page-safety-limit",
+            "3",
+        ],
+    )
+
+    assert module.main() == 0
+    assert table_count(db_path, "sep_base") == 20001
 
 
 def test_full_refresh_page_limit_failure_exits_nonzero_without_replacing_table(

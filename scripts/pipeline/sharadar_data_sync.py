@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 # API configuration
 API_KEY_ENV = "NASDAQ_DATA_LINK_API_KEY"
 BASE_URL = "https://data.nasdaq.com/api/v3/datatables/SHARADAR"
-PAGE_SAFETY_LIMIT = 50
+PAGE_SAFETY_LIMIT = 500
 BULK_EXPORT_POLL_SECONDS = 30.0
 BULK_EXPORT_MAX_ATTEMPTS = 60
 DEFAULT_BULK_DOWNLOAD_DIR = Path("data/downloads/full_refresh")
@@ -323,6 +323,7 @@ def download_new_data_paginated(
     table_config: Dict,
     since_date: Optional[date],
     api_key: str,
+    page_safety_limit: Optional[int] = None,
 ) -> Optional[pd.DataFrame]:
     """
     Download new data from API with PAGINATION support.
@@ -348,6 +349,7 @@ def download_new_data_paginated(
     cursor_id = None
     page = 1
     total_rows = 0
+    safety_limit = PAGE_SAFETY_LIMIT if page_safety_limit is None else page_safety_limit
     
     try:
         while True:
@@ -407,10 +409,10 @@ def download_new_data_paginated(
             if not cursor_id:
                 break
             
-            if page >= PAGE_SAFETY_LIMIT:
+            if page >= safety_limit:
                 raise RuntimeError(
                     f"Pagination safety limit reached for {table_name}: "
-                    f"{PAGE_SAFETY_LIMIT} pages downloaded and API still returned next_cursor_id"
+                    f"{safety_limit} pages downloaded and API still returned next_cursor_id"
                 )
             
             page += 1
@@ -764,6 +766,7 @@ def sync_table(
     keep_downloads: bool = False,
     bulk_poll_seconds: float = BULK_EXPORT_POLL_SECONDS,
     bulk_max_attempts: int = BULK_EXPORT_MAX_ATTEMPTS,
+    page_safety_limit: Optional[int] = None,
 ) -> Dict:
     """
     Sync a single table. Returns status dict.
@@ -870,7 +873,11 @@ def sync_table(
     
     # Download new data WITH PAGINATION
     df = download_new_data_paginated(
-        table_name, table_config, local_max, api_key
+        table_name,
+        table_config,
+        local_max,
+        api_key,
+        page_safety_limit=page_safety_limit,
     )
     
     if df is None:
@@ -940,6 +947,9 @@ Examples:
   
   # Force re-download even if up to date
   python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --tables SF1 --force
+
+  # Raise the incremental page cap for a large catch-up run
+  python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --tables SFP SF3 --page-safety-limit 1000
 """
     )
     
@@ -987,6 +997,12 @@ Examples:
         default=BULK_EXPORT_MAX_ATTEMPTS,
         help="Maximum bulk export status checks before failing",
     )
+    parser.add_argument(
+        "--page-safety-limit",
+        type=int,
+        default=PAGE_SAFETY_LIMIT,
+        help="Maximum 10,000-row pages to download for one incremental table before failing",
+    )
     
     args = parser.parse_args()
     selected_tables = (
@@ -1023,6 +1039,7 @@ Examples:
             keep_downloads=args.keep_downloads,
             bulk_poll_seconds=args.bulk_poll_seconds,
             bulk_max_attempts=args.bulk_max_attempts,
+            page_safety_limit=args.page_safety_limit,
         )
         results.append(result)
 
