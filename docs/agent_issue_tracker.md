@@ -1,6 +1,6 @@
 # Agent Issue Tracker
 
-Last updated: 2026-06-08
+Last updated: 2026-06-13
 
 This tracker captures review findings for the project base code. Use each entry to define the problem, implement the fix, record verification steps, and note final results.
 
@@ -272,14 +272,27 @@ Validation result: Passed. `compileall` completed successfully; focused full-ref
 
 ## AIT-011: Model Builds Need A Source Freshness Gate
 
-Status: Open
+Status: Fixed
 
 Problem: The normal Sharadar sync only updates the core daily subset (`SEP`, `DAILY`, `SF1`, `SF2`). Other model-relevant source tables can remain stale unless `full_sharadar_refresh.py` is run, but full refresh is intended for bootstrap/reset/recovery rather than routine pre-model operation. This increases the chance that feature builds, training runs, evaluations, or backtests use stale source data without an explicit failure or warning.
 
 Feature plan: Add a routine pre-model freshness workflow that checks every source table required by model builds, updates refreshable stale tables through the appropriate non-reset path, refreshes `trading_calendar` when `sep_base` advances, and fails closed when required data is stale beyond an accepted threshold. Keep full-refresh semantics reserved for starting over or rebuilding source tables from scratch.
 
-Implementation notes: Not implemented.
+Implementation notes: Implemented on 2026-06-13. Added a dedicated pre-model source freshness gate that defaults to the standard non-opt-in Sharadar source tables used by routine sync. The gate updates incremental tables through `sharadar_data_sync.sync_table`, refreshes full-reference tables through the sync entrypoint when policy allows it, supports report-only handling for full-reference tables, refreshes `trading_calendar` after a clean SEP pass, and fails closed when a required table still needs update/bootstrap, fails to check/download, has no local max date, or remains farther behind the API max date than the accepted threshold.
+
+Files changed:
+- `scripts/pipeline/pre_model_freshness_gate.py`
+- `tests/test_pre_model_freshness_gate.py`
 
 Test plan: Seed a DuckDB test database with a mix of fresh and stale model-required source tables. Mock API freshness responses and downloads, run the new freshness workflow, and verify stale incremental tables are updated, stale full-reload/reference tables are reported or refreshed according to policy, `trading_calendar` is rebuilt when needed, and model execution is blocked when required data remains stale.
 
-Result: Not tested after fix.
+Evidence: Added focused pre-model freshness gate tests. The tests verify the model-required table set follows the standard non-opt-in sync sources, stale incremental sources can be updated through the routine sync path, full-reference tables are refreshed or reported according to policy, `trading_calendar` is rebuilt after SEP advances, and the gate blocks model execution when required data remains behind the API max beyond the configured threshold.
+
+Validation command:
+- `python -m compileall scripts`
+- `python -m pytest tests/test_pre_model_freshness_gate.py`
+- `python -m pytest tests`
+- `python scripts/pipeline/pre_model_freshness_gate.py --help`
+- `git diff --check`
+
+Validation result: Passed. `compileall` completed successfully; the focused pre-model freshness tests reported `4 passed`; the full test suite reported `25 passed`; the new CLI help rendered successfully; `git diff --check` produced no whitespace errors.
