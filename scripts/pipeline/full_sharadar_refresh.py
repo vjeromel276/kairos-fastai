@@ -28,6 +28,9 @@ small change-log/reference that's cheap to re-download (SP500, INDICATORS).
 INDICATORS has no date column and barely changes, so it's opt-in only — you
 must list it explicitly via --tables.
 
+SFP and SF3-family tables use bulk export for the first local bootstrap, then
+normal incremental sync after a local max date exists.
+
 After refresh, the script refreshes `trading_calendar` from distinct
 `sep_base.date` values so the calendar stays aligned with the retained market
 data. Use `--skip-calendar` to disable that post-refresh step.
@@ -137,6 +140,7 @@ TABLES: Dict[str, Dict] = {
         "description": "Sharadar Fund Prices (mutual funds, ETFs)",
         "reload_mode": "incremental",
         "use_gte": False,
+        "bulk_bootstrap": True,
         "opt_in_only": True,
         "date_columns": ["date", "lastupdated"],
     },
@@ -185,6 +189,7 @@ TABLES: Dict[str, Dict] = {
         "description": "Institutional holdings (long form)",
         "reload_mode": "incremental",
         "use_gte": False,
+        "bulk_bootstrap": True,
         "date_columns": ["calendardate"],
     },
     "SF3A": {
@@ -194,6 +199,7 @@ TABLES: Dict[str, Dict] = {
         "description": "Institutional holdings by ticker",
         "reload_mode": "incremental",
         "use_gte": False,
+        "bulk_bootstrap": True,
         "date_columns": ["calendardate"],
     },
     "SF3B": {
@@ -203,6 +209,7 @@ TABLES: Dict[str, Dict] = {
         "description": "Institutional holdings by investor",
         "reload_mode": "incremental",
         "use_gte": False,
+        "bulk_bootstrap": True,
         "date_columns": ["calendardate"],
     },
     "SP500": {
@@ -709,6 +716,7 @@ def refresh_table(
     logger.info(f"{'='*60}")
 
     no_date = table_config.get("no_date_field", False)
+    needs_bulk_bootstrap = False
     if mode == "full":
         if no_date:
             local_max = None
@@ -722,9 +730,15 @@ def refresh_table(
     else:
         local_max = get_local_max_date(conn, table_config)
         logger.info(f"  Local max {table_config['db_date_field']}: {local_max or 'No data'}")
-        has_new, api_max = check_api_for_new_data(table_name, table_config, local_max, api_key)
-        if api_max:
-            logger.info(f"  API max {table_config['date_field']}: {api_max}")
+        if local_max is None and table_config.get("bulk_bootstrap", False):
+            needs_bulk_bootstrap = True
+            has_new = True
+            api_max = None
+            logger.info("  No local data; bulk bootstrap required before incremental refresh")
+        else:
+            has_new, api_max = check_api_for_new_data(table_name, table_config, local_max, api_key)
+            if api_max:
+                logger.info(f"  API max {table_config['date_field']}: {api_max}")
     result["local_max"] = local_max
     result["api_max"] = api_max
 
@@ -741,15 +755,17 @@ def refresh_table(
         logger.info(f"  Force download requested")
     elif mode == "full":
         logger.info(f"  Full reload scheduled")
+    elif needs_bulk_bootstrap:
+        logger.info(f"  Bulk bootstrap scheduled")
     else:
         logger.info(f"  New data available")
 
     if check_only:
         logger.info(f"  (check-only mode, skipping download)")
-        result["status"] = "needs_update"
+        result["status"] = "needs_bootstrap" if needs_bulk_bootstrap else "needs_update"
         return result
 
-    if mode == "full":
+    if mode == "full" or needs_bulk_bootstrap:
         try:
             before, after = replace_full_from_bulk_export(
                 conn,
@@ -762,13 +778,22 @@ def refresh_table(
                 max_attempts=bulk_max_attempts,
             )
         except Exception as e:
-            logger.error(f"  Bulk full reload failed: {redact_api_key(e)}")
+            action = "full reload" if mode == "full" else "bootstrap"
+            logger.error(f"  Bulk {action} failed: {redact_api_key(e)}")
             result["status"] = "download_failed"
             return result
         result["rows_before"] = before
         result["rows_after"] = after
         result["rows_added"] = after - before
-        logger.info(f"  + Replaced table: {before:,} -> {after:,} rows ({after - before:+,})")
+        new_max = get_local_max_date(conn, table_config) if not no_date else None
+        result["local_max"] = new_max
+        if mode == "full":
+            logger.info(f"  + Replaced table: {before:,} -> {after:,} rows ({after - before:+,})")
+        else:
+            logger.info(
+                f"  + Bootstrapped table via bulk export: {before:,} -> {after:,} rows "
+                f"({after - before:+,}), new max: {new_max}"
+            )
     else:
         df = download_paginated(table_name, table_config, local_max, api_key)
 
@@ -797,6 +822,7 @@ def print_summary(results: List[Dict]):
         "up_to_date": "+",
         "updated": "+",
         "needs_update": "!",
+        "needs_bootstrap": "!",
         "download_failed": "X",
         "check_failed": "?",
     }
@@ -896,6 +922,9 @@ Examples:
   # Refresh just metrics and tickers
   python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --tables METRICS TICKERS
 
+  # First-load SFP/SF3 through bulk export, then keep them incremental afterward
+  python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --tables SFP SF3
+
   # Force re-download (ignore staleness check)
   python scripts/pipeline/full_sharadar_refresh.py --db data/kairos-fastai.duckdb --tables SF3 --force
 """,
@@ -920,12 +949,12 @@ Examples:
         "--download-dir",
         type=Path,
         default=DEFAULT_BULK_DOWNLOAD_DIR,
-        help="Directory for temporary full-refresh bulk export downloads",
+        help="Directory for temporary bulk export downloads",
     )
     parser.add_argument(
         "--keep-downloads",
         action="store_true",
-        help="Keep full-refresh bulk export files after successful ingestion",
+        help="Keep bulk export files after successful ingestion",
     )
     parser.add_argument(
         "--bulk-poll-seconds",

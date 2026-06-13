@@ -23,6 +23,7 @@ KEEP_TABLES = {
     "daily",
     "sf1",
     "sf2",
+    "sfp",
     "sf3",
     "sf3a",
     "sf3b",

@@ -1,6 +1,6 @@
 # Agent Issue Tracker
 
-Last updated: 2026-05-31
+Last updated: 2026-06-08
 
 This tracker captures review findings for the project base code. Use each entry to define the problem, implement the fix, record verification steps, and note final results.
 
@@ -222,17 +222,25 @@ Validation result: Passed. `compileall` completed successfully; the focused cale
 
 ## AIT-009: `SFP` Is Refreshable But Not Preserved Or Audited
 
-Status: Open
+Status: Fixed
 
 Problem: `full_sharadar_refresh.py` supports the opt-in `SFP` table as local table `sfp`, but reset tooling does not include `sfp` in the source-table keep/audit lists. If `SFP` is ever refreshed, `prune_to_source_tables.py` will classify it as droppable, and `audit_source_db.py` will not report its state.
 
 Fix plan: Add `sfp` to the reset keep list and audit table lists, with date/entity metadata matching the refresh configuration.
 
-Implementation notes: Not implemented.
+Implementation notes: Implemented on 2026-06-08. Added `sfp` to the reset source-table audit list, date metadata, entity metadata, and prune keep list so a refreshed SFP table is treated as preserved source data. Also added focused temp-DuckDB coverage that verifies prune dry-run keeps `sfp` and audit output reports SFP rows, date range, and ticker entities.
 
 Test plan: Run the prune dry-run against a database containing `sfp` and verify it is kept. Run the audit command and verify `sfp` appears with row counts, date range, and distinct ticker count.
 
-Result: Not tested after fix.
+Evidence: Added `tests/test_sfp_reset_coverage.py`. The prune test creates a database containing `sfp` plus a derived table, runs the dry-run prune path, and verifies `sfp` is kept while the derived object is classified for dropping. The audit test creates minimal `sep_base`, `daily`, and `sfp` tables, runs the audit command, and verifies SFP appears with its date range and ticker entity metadata.
+
+Validation command:
+- `python -m compileall scripts`
+- `python -m pytest tests/test_sfp_reset_coverage.py`
+- `python -m pytest tests`
+- `git diff --check`
+
+Validation result: Passed. `compileall` completed successfully; the focused SFP reset coverage tests passed; the full test suite reported `21 passed`; `git diff --check` produced no whitespace errors.
 
 ## AIT-010: Full Refresh Should Use Bulk Export And Local Ingestion
 

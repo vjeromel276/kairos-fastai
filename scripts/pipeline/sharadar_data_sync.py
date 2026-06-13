@@ -26,6 +26,8 @@ Tables supported:
 - SF3/SF3A/SF3B: Institutional holdings (date field: calendardate)
 - SP500: S&P 500 constituent changes (full reload)
 - SFP and INDICATORS are checked by default in --check-only and are opt-in for sync.
+- SFP and SF3-family tables use bulk export for the first local bootstrap,
+  then normal incremental sync after a local max date exists.
 
 Usage:
     # Check and sync standard package tables
@@ -73,7 +75,7 @@ logger = logging.getLogger(__name__)
 # API configuration
 API_KEY_ENV = "NASDAQ_DATA_LINK_API_KEY"
 BASE_URL = "https://data.nasdaq.com/api/v3/datatables/SHARADAR"
-PAGE_SAFETY_LIMIT = 500
+PAGE_SAFETY_LIMIT = 5000
 BULK_EXPORT_POLL_SECONDS = 30.0
 BULK_EXPORT_MAX_ATTEMPTS = 60
 DEFAULT_BULK_DOWNLOAD_DIR = Path("data/downloads/full_refresh")
@@ -132,6 +134,7 @@ TABLES: Dict[str, Dict] = {
         "description": "Sharadar Fund Prices (mutual funds, ETFs)",
         "reload_mode": "incremental",
         "use_gte": False,
+        "bulk_bootstrap": True,
         "opt_in_only": True,
         "date_columns": ["date", "lastupdated"],
     },
@@ -180,6 +183,7 @@ TABLES: Dict[str, Dict] = {
         "description": "Institutional holdings (long form)",
         "reload_mode": "incremental",
         "use_gte": False,
+        "bulk_bootstrap": True,
         "date_columns": ["calendardate"],
     },
     "SF3A": {
@@ -189,6 +193,7 @@ TABLES: Dict[str, Dict] = {
         "description": "Institutional holdings by ticker",
         "reload_mode": "incremental",
         "use_gte": False,
+        "bulk_bootstrap": True,
         "date_columns": ["calendardate"],
     },
     "SF3B": {
@@ -198,6 +203,7 @@ TABLES: Dict[str, Dict] = {
         "description": "Institutional holdings by investor",
         "reload_mode": "incremental",
         "use_gte": False,
+        "bulk_bootstrap": True,
         "date_columns": ["calendardate"],
     },
     "SP500": {
@@ -837,6 +843,43 @@ def sync_table(
     result["local_max"] = local_max
     logger.info(f"  Local max date: {local_max or 'No data'}")
 
+    if local_max is None and table_config.get("bulk_bootstrap", False):
+        logger.info("  No local data; bulk bootstrap required before incremental sync")
+        result["has_new_data"] = True
+
+        if check_only:
+            logger.info("  (check-only mode, skipping bulk bootstrap)")
+            result["status"] = "needs_bootstrap"
+            return result
+
+        try:
+            before, after = replace_full_from_bulk_export(
+                conn,
+                table_name,
+                table_config,
+                api_key,
+                download_root,
+                keep_downloads=keep_downloads,
+                poll_seconds=bulk_poll_seconds,
+                max_attempts=bulk_max_attempts,
+            )
+        except Exception as e:
+            logger.error(f"  Bulk bootstrap failed: {redact_api_key(e)}")
+            result["status"] = "download_failed"
+            return result
+
+        new_max = get_local_max_date(conn, table_config)
+        result["rows_before"] = before
+        result["rows_after"] = after
+        result["rows_added"] = after - before
+        result["local_max"] = new_max
+        logger.info(
+            f"  ✓ Bootstrapped table via bulk export: {before:,} -> {after:,} rows "
+            f"({after - before:+,}), new max date: {new_max}"
+        )
+        result["status"] = "updated"
+        return result
+
     has_new, api_max, est_rows = check_api_for_new_data(
         table_name,
         table_config,
@@ -909,6 +952,7 @@ def print_summary(results: List[Dict]):
             "up_to_date": "✓",
             "updated": "✓",
             "needs_update": "⚠",
+            "needs_bootstrap": "⚠",
             "download_failed": "✗",
             "check_failed": "?",
         }.get(r["status"], "?")
@@ -944,6 +988,9 @@ Examples:
   
   # Sync only SEP and DAILY
   python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --tables SEP DAILY
+
+  # First-load SFP/SF3 through bulk export, then keep them incremental afterward
+  python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --tables SFP SF3
   
   # Force re-download even if up to date
   python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --tables SF1 --force
@@ -978,12 +1025,12 @@ Examples:
         "--download-dir",
         type=Path,
         default=DEFAULT_BULK_DOWNLOAD_DIR,
-        help="Directory for temporary full-reload bulk export downloads",
+        help="Directory for temporary bulk export downloads",
     )
     parser.add_argument(
         "--keep-downloads",
         action="store_true",
-        help="Keep full-reload bulk export files after successful ingestion",
+        help="Keep bulk export files after successful ingestion",
     )
     parser.add_argument(
         "--bulk-poll-seconds",
