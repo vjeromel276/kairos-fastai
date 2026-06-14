@@ -108,6 +108,60 @@ def test_feature_set_b_adds_rsi_slope_columns(tmp_path) -> None:
     )
 
 
+def test_feature_set_c_adds_rsi_ema_recency_columns(tmp_path) -> None:
+    db_path = tmp_path / "rsi-feature-set-c.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        dates = seed_sep_base(conn, table_name="sep_base_original")
+        seed_sep_base(conn, table_name="sep_base_changed_future", future_multiplier=10.0)
+        dataset = builder.build_one_ticker_dataset(
+            conn,
+            "AAPL",
+            source_table="sep_base_original",
+            rsi_window=3,
+            feature_set="C",
+        )
+        changed_future = builder.build_one_ticker_dataset(
+            conn,
+            "AAPL",
+            source_table="sep_base_changed_future",
+            rsi_window=3,
+            feature_set="C",
+        )
+    finally:
+        conn.close()
+
+    expected_ema_columns = {
+        "rsi_ema_5",
+        "rsi_ema_10",
+        "rsi_ema_20",
+        "rsi_ema_5_minus_10",
+        "rsi_ema_5_minus_20",
+    }
+    assert expected_ema_columns.issubset(dataset.columns)
+    assert dataset["rsi_ema_5"].iloc[:3].isna().all()
+    pd.testing.assert_series_equal(
+        dataset["rsi_ema_5_minus_10"],
+        dataset["rsi_ema_5"] - dataset["rsi_ema_10"],
+        check_names=False,
+    )
+    pd.testing.assert_series_equal(
+        dataset["rsi_ema_5_minus_20"],
+        dataset["rsi_ema_5"] - dataset["rsi_ema_20"],
+        check_names=False,
+    )
+
+    cutoff_date = pd.Timestamp(dates[14])
+    ema_columns = ["rsi_ema_5", "rsi_ema_10", "rsi_ema_20"]
+    original_known = dataset.loc[dataset["date"] <= cutoff_date, ema_columns].reset_index(
+        drop=True
+    )
+    changed_known = changed_future.loc[
+        changed_future["date"] <= cutoff_date, ema_columns
+    ].reset_index(drop=True)
+    pd.testing.assert_frame_equal(original_known, changed_known)
+
+
 def test_main_runs_against_temp_duckdb_fixture(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "rsi-main.duckdb"
     conn = duckdb.connect(str(db_path))

@@ -16,7 +16,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.experiments.rsi_features import add_rsi_slope_features, calculate_rsi  # noqa: E402
+from scripts.experiments.rsi_features import (  # noqa: E402
+    add_rsi_ema_features,
+    add_rsi_slope_features,
+    calculate_rsi,
+)
 
 
 logging.basicConfig(
@@ -32,7 +36,8 @@ DEFAULT_RSI_WINDOW = 14
 DEFAULT_HORIZON_DAYS = 5
 FEATURE_SET_A = "A"
 FEATURE_SET_B = "B"
-FEATURE_SET_CHOICES = (FEATURE_SET_A, FEATURE_SET_B)
+FEATURE_SET_C = "C"
+FEATURE_SET_CHOICES = (FEATURE_SET_A, FEATURE_SET_B, FEATURE_SET_C)
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -102,6 +107,8 @@ def build_one_ticker_dataset(
     normalized_feature_set = feature_set.upper()
     if normalized_feature_set == FEATURE_SET_B:
         result = add_rsi_slope_features(result, rsi_column=rsi_column)
+    elif normalized_feature_set == FEATURE_SET_C:
+        result = add_rsi_ema_features(result, rsi_column=rsi_column)
     elif normalized_feature_set != FEATURE_SET_A:
         raise ValueError(f"feature_set must be one of: {', '.join(FEATURE_SET_CHOICES)}")
 
@@ -156,7 +163,10 @@ def main() -> int:
         "--feature-set",
         choices=FEATURE_SET_CHOICES,
         default=FEATURE_SET_A,
-        help="Feature set to build: A = RSI today, B = RSI today plus slopes",
+        help=(
+            "Feature set to build: A = RSI today, B = RSI slopes, "
+            "C = RSI EMA recency"
+        ),
     )
     args = parser.parse_args()
 
