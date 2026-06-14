@@ -88,6 +88,36 @@ def load_one_ticker_dataset(
     return df
 
 
+def load_panel_dataset(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+    tickers: list[str],
+) -> pd.DataFrame:
+    selected_tickers = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
+    if not selected_tickers:
+        raise ValueError("at least one ticker is required")
+
+    table_identifier = quote_identifier(table_name)
+    placeholders = ", ".join(["?"] * len(selected_tickers))
+    query = f"""
+        SELECT *
+        FROM {table_identifier}
+        WHERE ticker IN ({placeholders})
+        ORDER BY date, ticker
+    """
+    df = conn.execute(query, selected_tickers).fetchdf()
+    if df.empty:
+        raise ValueError(f"no rows found for selected tickers in {table_name}")
+    validate_no_duplicate_ticker_dates(df)
+    return df
+
+
+def validate_no_duplicate_ticker_dates(df: pd.DataFrame) -> None:
+    duplicate_count = int(df.duplicated(["ticker", "date"]).sum())
+    if duplicate_count:
+        raise ValueError(f"duplicate ticker/date rows found: {duplicate_count}")
+
+
 def complete_rows(
     df: pd.DataFrame,
     required_columns: list[str],
@@ -145,6 +175,56 @@ def prior_direction_baseline(prior_returns: pd.Series) -> pd.Series:
         "float64"
     )
     return prediction
+
+
+def ranking_metrics_by_date(
+    actual_return: pd.Series,
+    predicted_score: pd.Series,
+    dates: pd.Series,
+    top_k: int = 10,
+) -> dict[str, float | int]:
+    if top_k < 1:
+        raise ValueError("top_k must be >= 1")
+
+    frame = pd.DataFrame(
+        {
+            "date": pd.to_datetime(dates),
+            "actual_return": pd.to_numeric(actual_return, errors="coerce"),
+            "predicted_score": pd.to_numeric(predicted_score, errors="coerce"),
+        }
+    ).dropna(subset=["date", "actual_return", "predicted_score"])
+    if frame.empty:
+        return {
+            "date_count": 0,
+            "top_k": top_k,
+            "top_k_average_return": np.nan,
+            "top_k_win_rate": np.nan,
+            "mean_information_coefficient": np.nan,
+        }
+
+    top_returns: list[float] = []
+    top_win_rates: list[float] = []
+    information_coefficients: list[float] = []
+    for _, group in frame.groupby("date"):
+        ranked = group.sort_values("predicted_score", ascending=False).head(top_k)
+        top_returns.append(float(ranked["actual_return"].mean()))
+        top_win_rates.append(float((ranked["actual_return"] > 0).mean()))
+        if group["predicted_score"].nunique() >= 2 and group["actual_return"].nunique() >= 2:
+            information_coefficients.append(
+                float(group["predicted_score"].corr(group["actual_return"], method="spearman"))
+            )
+
+    return {
+        "date_count": int(frame["date"].nunique()),
+        "top_k": top_k,
+        "top_k_average_return": float(np.mean(top_returns)),
+        "top_k_win_rate": float(np.mean(top_win_rates)),
+        "mean_information_coefficient": (
+            float(np.mean(information_coefficients))
+            if information_coefficients
+            else np.nan
+        ),
+    }
 
 
 def feature_columns_for_set(feature_set: str) -> list[str]:
@@ -450,6 +530,197 @@ def run_feature_set_comparison(
     }
 
 
+def evaluate_panel_regression(
+    df: pd.DataFrame,
+    feature_columns: list[str],
+    target_column: str,
+    train_end: str,
+    validation_end: str,
+    test_end: str,
+    train_start: str | None = None,
+    validation_start: str | None = None,
+    test_start: str | None = None,
+    embargo: int | None = None,
+    embargo_unit: str = "trading",
+    top_k: int = 10,
+) -> dict[str, Any]:
+    model_df = complete_rows(df, feature_columns + [target_column]).copy()
+    splits = split_complete_rows(
+        model_df,
+        train_start=train_start,
+        train_end=train_end,
+        validation_start=validation_start,
+        validation_end=validation_end,
+        test_start=test_start,
+        test_end=test_end,
+        embargo=embargo,
+        embargo_unit=embargo_unit,
+    )
+    model = LinearRegression()
+    model.fit(splits["train"][feature_columns], splits["train"][target_column])
+
+    evaluations: dict[str, Any] = {}
+    for split_name in ("validation", "test"):
+        split_df = splits[split_name]
+        model_prediction = pd.Series(
+            model.predict(split_df[feature_columns]) if not split_df.empty else [],
+            index=split_df.index,
+            dtype="float64",
+        )
+        evaluations[split_name] = {
+            "model": regression_metrics(split_df[target_column], model_prediction),
+            "ranking": ranking_metrics_by_date(
+                split_df[target_column],
+                model_prediction,
+                split_df["date"],
+                top_k=top_k,
+            ),
+        }
+
+    return {
+        "model": "linear_regression",
+        "feature_columns": feature_columns,
+        "target": target_column,
+        "split_ranges": split_ranges(splits),
+        "prediction_counts": {
+            "train": 0,
+            "validation": len(splits["validation"]),
+            "test": len(splits["test"]),
+        },
+        "metrics": evaluations,
+    }
+
+
+def evaluate_panel_classification(
+    df: pd.DataFrame,
+    feature_columns: list[str],
+    direction_target: str,
+    return_target: str,
+    train_end: str,
+    validation_end: str,
+    test_end: str,
+    train_start: str | None = None,
+    validation_start: str | None = None,
+    test_start: str | None = None,
+    embargo: int | None = None,
+    embargo_unit: str = "trading",
+    top_k: int = 10,
+) -> dict[str, Any]:
+    model_df = complete_rows(df, feature_columns + [direction_target, return_target]).copy()
+    splits = split_complete_rows(
+        model_df,
+        train_start=train_start,
+        train_end=train_end,
+        validation_start=validation_start,
+        validation_end=validation_end,
+        test_start=test_start,
+        test_end=test_end,
+        embargo=embargo,
+        embargo_unit=embargo_unit,
+    )
+    if splits["train"][direction_target].nunique() < 2:
+        raise ValueError("classification train split must contain both classes")
+
+    model = LogisticRegression(max_iter=1000)
+    model.fit(
+        splits["train"][feature_columns],
+        splits["train"][direction_target].astype("int64"),
+    )
+
+    evaluations: dict[str, Any] = {}
+    for split_name in ("validation", "test"):
+        split_df = splits[split_name]
+        if split_df.empty:
+            model_prediction = pd.Series([], index=split_df.index, dtype="float64")
+        else:
+            model_prediction = pd.Series(
+                model.predict_proba(split_df[feature_columns])[:, 1],
+                index=split_df.index,
+                dtype="float64",
+            )
+        evaluations[split_name] = {
+            "model": classification_metrics(split_df[direction_target], model_prediction),
+            "ranking": ranking_metrics_by_date(
+                split_df[return_target],
+                model_prediction,
+                split_df["date"],
+                top_k=top_k,
+            ),
+        }
+
+    return {
+        "model": "logistic_regression",
+        "feature_columns": feature_columns,
+        "target": direction_target,
+        "ranking_target": return_target,
+        "split_ranges": split_ranges(splits),
+        "prediction_counts": {
+            "train": 0,
+            "validation": len(splits["validation"]),
+            "test": len(splits["test"]),
+        },
+        "metrics": evaluations,
+    }
+
+
+def run_panel_models(
+    conn: duckdb.DuckDBPyConnection,
+    tickers: list[str],
+    table_name: str = DEFAULT_OUTPUT_TABLE,
+    feature_set: str = FEATURE_SET_A,
+    return_target: str = DEFAULT_RETURN_TARGET,
+    direction_target: str = DEFAULT_DIRECTION_TARGET,
+    train_end: str = "",
+    validation_end: str = "",
+    test_end: str = "",
+    train_start: str | None = None,
+    validation_start: str | None = None,
+    test_start: str | None = None,
+    embargo: int | None = None,
+    embargo_unit: str = "trading",
+    top_k: int = 10,
+) -> dict[str, Any]:
+    if feature_set == FEATURE_SET_ALL:
+        raise ValueError("panel mode requires one feature set: A, B, or C")
+    df = load_panel_dataset(conn, table_name=table_name, tickers=tickers)
+    feature_columns = feature_columns_for_set(feature_set)
+    return {
+        "mode": "panel",
+        "tickers": sorted(df["ticker"].unique().tolist()),
+        "table": table_name,
+        "feature_set": feature_set,
+        "regression": evaluate_panel_regression(
+            df,
+            feature_columns=feature_columns,
+            target_column=return_target,
+            train_start=train_start,
+            train_end=train_end,
+            validation_start=validation_start,
+            validation_end=validation_end,
+            test_start=test_start,
+            test_end=test_end,
+            embargo=embargo,
+            embargo_unit=embargo_unit,
+            top_k=top_k,
+        ),
+        "classification": evaluate_panel_classification(
+            df,
+            feature_columns=feature_columns,
+            direction_target=direction_target,
+            return_target=return_target,
+            train_start=train_start,
+            train_end=train_end,
+            validation_start=validation_start,
+            validation_end=validation_end,
+            test_start=test_start,
+            test_end=test_end,
+            embargo=embargo,
+            embargo_unit=embargo_unit,
+            top_k=top_k,
+        ),
+    }
+
+
 def json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: json_safe(item) for key, item in value.items()}
@@ -476,6 +747,16 @@ def write_metrics_json(summary: dict[str, Any], output_path: Path) -> None:
 
 
 def print_summary(summary: dict[str, Any]) -> None:
+    if summary.get("mode") == "panel":
+        print(f"Panel tickers: {', '.join(summary['tickers'])}")
+        for model_key in ("regression", "classification"):
+            model_summary = summary[model_key]
+            print(f"{model_key}: {model_summary['model']} on {model_summary['feature_columns']}")
+            for split_name in ("validation", "test"):
+                metrics = model_summary["metrics"][split_name]
+                print(f"  {split_name}: model={metrics['model']} ranking={metrics['ranking']}")
+        return
+
     print(f"Ticker: {summary['ticker']}")
     if "feature_sets" in summary:
         print("Feature set comparison:")
@@ -501,10 +782,16 @@ def print_summary(summary: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Train one-ticker RSI-today baseline models",
+        description="Train RSI-today baseline models",
     )
     parser.add_argument("--db", required=True, help="Path to DuckDB database")
-    parser.add_argument("--ticker", required=True, help="Ticker to train, for example AAPL")
+    ticker_group = parser.add_mutually_exclusive_group(required=True)
+    ticker_group.add_argument("--ticker", help="Ticker to train, for example AAPL")
+    ticker_group.add_argument(
+        "--tickers",
+        nargs="+",
+        help="Ticker list for panel mode, for example AAPL MSFT GOOG",
+    )
     parser.add_argument(
         "--table",
         default=DEFAULT_OUTPUT_TABLE,
@@ -540,14 +827,36 @@ def main() -> int:
         default=None,
         help="Optional path to write JSON metrics summary",
     )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=10,
+        help="Top-K count for panel ranking metrics",
+    )
     args = parser.parse_args()
 
     conn = duckdb.connect(args.db)
     try:
-        if args.feature_set == FEATURE_SET_ALL:
+        if args.tickers:
+            summary = run_panel_models(
+                conn,
+                tickers=args.tickers,
+                table_name=args.table,
+                feature_set=args.feature_set,
+                train_start=args.train_start,
+                train_end=args.train_end,
+                validation_start=args.validation_start,
+                validation_end=args.validation_end,
+                test_start=args.test_start,
+                test_end=args.test_end,
+                embargo=args.embargo,
+                embargo_unit=args.embargo_unit,
+                top_k=args.top_k,
+            )
+        elif args.feature_set == FEATURE_SET_ALL:
             summary = run_feature_set_comparison(
                 conn,
-                ticker=args.ticker,
+                ticker=args.ticker.upper(),
                 table_name=args.table,
                 train_start=args.train_start,
                 train_end=args.train_end,
@@ -561,7 +870,7 @@ def main() -> int:
         else:
             summary = run_one_ticker_baselines(
                 conn,
-                ticker=args.ticker,
+                ticker=args.ticker.upper(),
                 table_name=args.table,
                 feature_columns=feature_columns_for_set(args.feature_set),
                 feature_set=args.feature_set,
