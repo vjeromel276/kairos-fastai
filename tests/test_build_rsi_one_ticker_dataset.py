@@ -62,6 +62,7 @@ def test_build_one_ticker_dataset_writes_default_table(tmp_path) -> None:
         conn.close()
 
     assert rows_written == 20
+    assert not any(column.startswith("rsi_slope_") for column in dataset.columns)
     assert len(output) == 20
     assert output[["ticker", "date"]].drop_duplicates().shape[0] == len(output)
     assert output["ticker"].unique().tolist() == ["AAPL"]
@@ -72,6 +73,39 @@ def test_build_one_ticker_dataset_writes_default_table(tmp_path) -> None:
     assert output["future_5d_return"].iloc[-5:].isna().all()
     assert output["winner_5d"].iloc[:15].tolist() == [1] * 15
     assert output["winner_5d"].iloc[-5:].isna().all()
+
+
+def test_feature_set_b_adds_rsi_slope_columns(tmp_path) -> None:
+    db_path = tmp_path / "rsi-feature-set-b.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_sep_base(conn)
+        dataset = builder.build_one_ticker_dataset(
+            conn,
+            "AAPL",
+            rsi_window=3,
+            feature_set="B",
+        )
+    finally:
+        conn.close()
+
+    expected_slope_columns = {
+        "rsi_slope_3",
+        "rsi_slope_5",
+        "rsi_slope_10",
+        "rsi_slope_20",
+    }
+    assert expected_slope_columns.issubset(dataset.columns)
+    assert dataset["rsi_slope_3"].iloc[:6].isna().all()
+    assert dataset["rsi_slope_5"].iloc[:8].isna().all()
+    assert dataset["rsi_slope_10"].iloc[:13].isna().all()
+    assert dataset["rsi_slope_20"].isna().all()
+    assert dataset["rsi_slope_3"].iloc[6] == pytest.approx(
+        dataset["rsi_3"].iloc[6] - dataset["rsi_3"].iloc[3]
+    )
+    assert dataset["rsi_slope_5"].iloc[8] == pytest.approx(
+        dataset["rsi_3"].iloc[8] - dataset["rsi_3"].iloc[3]
+    )
 
 
 def test_main_runs_against_temp_duckdb_fixture(monkeypatch, tmp_path) -> None:

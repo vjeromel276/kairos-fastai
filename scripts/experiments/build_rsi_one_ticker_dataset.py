@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.experiments.rsi_features import calculate_rsi  # noqa: E402
+from scripts.experiments.rsi_features import add_rsi_slope_features, calculate_rsi  # noqa: E402
 
 
 logging.basicConfig(
@@ -30,6 +30,9 @@ DEFAULT_SOURCE_TABLE = "sep_base"
 DEFAULT_OUTPUT_TABLE = "rsi_experiment_one_ticker_v1"
 DEFAULT_RSI_WINDOW = 14
 DEFAULT_HORIZON_DAYS = 5
+FEATURE_SET_A = "A"
+FEATURE_SET_B = "B"
+FEATURE_SET_CHOICES = (FEATURE_SET_A, FEATURE_SET_B)
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -85,14 +88,23 @@ def build_one_ticker_dataset(
     source_table: str = DEFAULT_SOURCE_TABLE,
     rsi_window: int = DEFAULT_RSI_WINDOW,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
+    feature_set: str = FEATURE_SET_A,
 ) -> pd.DataFrame:
-    """Build feature set A and 5-day targets for one ticker."""
+    """Build one-ticker RSI features and forward targets."""
     prices = load_one_ticker_prices(conn, ticker=ticker, source_table=source_table)
     if prices.empty:
         raise ValueError(f"no rows found for ticker {ticker} in {source_table}")
 
     result = prices.copy()
-    result[f"rsi_{rsi_window}"] = calculate_rsi(result["closeadj"], window=rsi_window)
+    rsi_column = f"rsi_{rsi_window}"
+    result[rsi_column] = calculate_rsi(result["closeadj"], window=rsi_window)
+
+    normalized_feature_set = feature_set.upper()
+    if normalized_feature_set == FEATURE_SET_B:
+        result = add_rsi_slope_features(result, rsi_column=rsi_column)
+    elif normalized_feature_set != FEATURE_SET_A:
+        raise ValueError(f"feature_set must be one of: {', '.join(FEATURE_SET_CHOICES)}")
+
     return add_future_targets(result, horizon_days=horizon_days)
 
 
@@ -140,6 +152,12 @@ def main() -> int:
         default=DEFAULT_HORIZON_DAYS,
         help=f"Future return horizon in trading rows (default: {DEFAULT_HORIZON_DAYS})",
     )
+    parser.add_argument(
+        "--feature-set",
+        choices=FEATURE_SET_CHOICES,
+        default=FEATURE_SET_A,
+        help="Feature set to build: A = RSI today, B = RSI today plus slopes",
+    )
     args = parser.parse_args()
 
     conn = duckdb.connect(args.db)
@@ -150,6 +168,7 @@ def main() -> int:
             source_table=args.source_table,
             rsi_window=args.rsi_window,
             horizon_days=args.horizon_days,
+            feature_set=args.feature_set,
         )
         rows_written = write_dataset_table(conn, dataset, output_table=args.output_table)
     finally:
