@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.experiments import build_rsi_one_ticker_dataset as builder  # noqa: E402
 from scripts.experiments import train_rsi_one_ticker_baselines as trainer  # noqa: E402
+from scripts.pipeline import pre_model_freshness_gate  # noqa: E402
 
 
 logging.basicConfig(
@@ -26,10 +27,50 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DEFAULT_METRICS_DIR = Path("data/experiments/rsi")
+REAL_DB_PATH = ROOT / "data" / "kairos-fastai.duckdb"
 
 
 def default_metrics_path(ticker: str) -> Path:
     return DEFAULT_METRICS_DIR / f"{ticker.lower()}_rsi_feature_comparison.json"
+
+
+def is_real_project_db(db_path: Path) -> bool:
+    return db_path.resolve() == REAL_DB_PATH.resolve()
+
+
+def raise_if_freshness_failed(gate_result: dict) -> None:
+    if gate_result["passed"]:
+        return
+    blockers = "; ".join(gate_result["blockers"])
+    raise RuntimeError(f"Source freshness gate failed: {blockers}")
+
+
+def run_source_freshness_gate(db_path: Path) -> None:
+    api_key = pre_model_freshness_gate.sync.get_api_key()
+    conn = duckdb.connect(str(db_path))
+    try:
+        gate_result = pre_model_freshness_gate.run_gate(
+            conn=conn,
+            api_key=api_key,
+            selected_tables=pre_model_freshness_gate.MODEL_REQUIRED_TABLES,
+            check_only=False,
+        )
+    finally:
+        conn.close()
+    raise_if_freshness_failed(gate_result)
+
+
+def maybe_run_source_freshness_gate(
+    db_path: Path,
+    skip_freshness_check: bool = False,
+) -> None:
+    if skip_freshness_check:
+        logger.info("Skipping source freshness gate by request")
+        return
+    if not is_real_project_db(db_path):
+        logger.info("Skipping source freshness gate for non-project DB: %s", db_path)
+        return
+    run_source_freshness_gate(db_path)
 
 
 def run_experiment(
@@ -48,9 +89,14 @@ def run_experiment(
     embargo_unit: str = "trading",
     rsi_window: int = builder.DEFAULT_RSI_WINDOW,
     horizon_days: int = builder.DEFAULT_HORIZON_DAYS,
+    skip_freshness_check: bool = False,
 ) -> dict:
     ticker = ticker.upper()
     metrics_path = metrics_json or default_metrics_path(ticker)
+    maybe_run_source_freshness_gate(
+        db_path,
+        skip_freshness_check=skip_freshness_check,
+    )
 
     conn = duckdb.connect(str(db_path))
     try:
@@ -135,6 +181,11 @@ def main() -> int:
         default="trading",
         help="Embargo unit",
     )
+    parser.add_argument(
+        "--skip-freshness-check",
+        action="store_true",
+        help="Skip the source freshness gate before running against the project DB",
+    )
     args = parser.parse_args()
 
     run_experiment(
@@ -151,6 +202,7 @@ def main() -> int:
         metrics_json=args.metrics_json,
         embargo=args.embargo,
         embargo_unit=args.embargo_unit,
+        skip_freshness_check=args.skip_freshness_check,
     )
     return 0
 
