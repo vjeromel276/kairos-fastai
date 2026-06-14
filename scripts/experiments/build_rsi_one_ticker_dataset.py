@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a one-ticker RSI experiment dataset from Sharadar SEP data."""
+"""Build RSI experiment datasets from Sharadar SEP data."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SOURCE_TABLE = "sep_base"
 DEFAULT_OUTPUT_TABLE = "rsi_experiment_one_ticker_v1"
+DEFAULT_PANEL_OUTPUT_TABLE = "rsi_experiment_panel_v1"
 DEFAULT_RSI_WINDOW = 14
 DEFAULT_HORIZON_DAYS = 5
 FEATURE_SET_A = "A"
@@ -68,6 +69,56 @@ def load_one_ticker_prices(
     return conn.execute(query, [ticker]).fetchdf()
 
 
+def normalize_tickers(tickers: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for ticker in tickers:
+        ticker_value = ticker.strip().upper()
+        if not ticker_value or ticker_value in seen:
+            continue
+        normalized.append(ticker_value)
+        seen.add(ticker_value)
+    if not normalized:
+        raise ValueError("at least one ticker is required")
+    return normalized
+
+
+def load_panel_prices(
+    conn: duckdb.DuckDBPyConnection,
+    tickers: list[str],
+    source_table: str = DEFAULT_SOURCE_TABLE,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    """Load adjusted close prices for a constrained ticker panel."""
+    selected_tickers = normalize_tickers(tickers)
+    source_identifier = quote_identifier(source_table)
+    placeholders = ", ".join(["?"] * len(selected_tickers))
+    filters = [
+        f"ticker IN ({placeholders})",
+        "date IS NOT NULL",
+        "closeadj IS NOT NULL",
+    ]
+    params: list[object] = list(selected_tickers)
+    if start_date:
+        filters.append("date >= ?")
+        params.append(start_date)
+    if end_date:
+        filters.append("date <= ?")
+        params.append(end_date)
+
+    query = f"""
+        SELECT
+            ticker,
+            CAST(date AS DATE) AS date,
+            CAST(closeadj AS DOUBLE) AS closeadj
+        FROM {source_identifier}
+        WHERE {' AND '.join(filters)}
+        ORDER BY ticker, date
+    """
+    return conn.execute(query, params).fetchdf()
+
+
 def add_future_targets(
     df: pd.DataFrame,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
@@ -87,6 +138,28 @@ def add_future_targets(
     return result
 
 
+def add_feature_columns(
+    prices: pd.DataFrame,
+    rsi_window: int = DEFAULT_RSI_WINDOW,
+    horizon_days: int = DEFAULT_HORIZON_DAYS,
+    feature_set: str = FEATURE_SET_A,
+) -> pd.DataFrame:
+    """Build RSI features and forward targets for one ticker price path."""
+    result = prices.sort_values("date").copy()
+    rsi_column = f"rsi_{rsi_window}"
+    result[rsi_column] = calculate_rsi(result["closeadj"], window=rsi_window)
+
+    normalized_feature_set = feature_set.upper()
+    if normalized_feature_set == FEATURE_SET_B:
+        result = add_rsi_slope_features(result, rsi_column=rsi_column)
+    elif normalized_feature_set == FEATURE_SET_C:
+        result = add_rsi_ema_features(result, rsi_column=rsi_column)
+    elif normalized_feature_set != FEATURE_SET_A:
+        raise ValueError(f"feature_set must be one of: {', '.join(FEATURE_SET_CHOICES)}")
+
+    return add_future_targets(result, horizon_days=horizon_days)
+
+
 def build_one_ticker_dataset(
     conn: duckdb.DuckDBPyConnection,
     ticker: str,
@@ -100,19 +173,47 @@ def build_one_ticker_dataset(
     if prices.empty:
         raise ValueError(f"no rows found for ticker {ticker} in {source_table}")
 
-    result = prices.copy()
-    rsi_column = f"rsi_{rsi_window}"
-    result[rsi_column] = calculate_rsi(result["closeadj"], window=rsi_window)
+    return add_feature_columns(
+        prices,
+        rsi_window=rsi_window,
+        horizon_days=horizon_days,
+        feature_set=feature_set,
+    )
 
-    normalized_feature_set = feature_set.upper()
-    if normalized_feature_set == FEATURE_SET_B:
-        result = add_rsi_slope_features(result, rsi_column=rsi_column)
-    elif normalized_feature_set == FEATURE_SET_C:
-        result = add_rsi_ema_features(result, rsi_column=rsi_column)
-    elif normalized_feature_set != FEATURE_SET_A:
-        raise ValueError(f"feature_set must be one of: {', '.join(FEATURE_SET_CHOICES)}")
 
-    return add_future_targets(result, horizon_days=horizon_days)
+def build_panel_dataset(
+    conn: duckdb.DuckDBPyConnection,
+    tickers: list[str],
+    source_table: str = DEFAULT_SOURCE_TABLE,
+    rsi_window: int = DEFAULT_RSI_WINDOW,
+    horizon_days: int = DEFAULT_HORIZON_DAYS,
+    feature_set: str = FEATURE_SET_A,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    """Build RSI features and forward targets for a constrained ticker panel."""
+    prices = load_panel_prices(
+        conn,
+        tickers=tickers,
+        source_table=source_table,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if prices.empty:
+        raise ValueError("no source rows found for selected panel")
+
+    parts = [
+        add_feature_columns(
+            group,
+            rsi_window=rsi_window,
+            horizon_days=horizon_days,
+            feature_set=feature_set,
+        )
+        for _, group in prices.groupby("ticker", sort=False)
+    ]
+    return pd.concat(parts, ignore_index=True).sort_values(["ticker", "date"]).reset_index(
+        drop=True
+    )
 
 
 def write_dataset_table(
@@ -133,10 +234,16 @@ def write_dataset_table(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a one-ticker RSI experiment dataset from sep_base",
+        description="Build RSI experiment datasets from sep_base",
     )
     parser.add_argument("--db", required=True, help="Path to DuckDB database")
-    parser.add_argument("--ticker", required=True, help="Ticker to build, for example AAPL")
+    ticker_group = parser.add_mutually_exclusive_group(required=True)
+    ticker_group.add_argument("--ticker", help="Single ticker to build, for example AAPL")
+    ticker_group.add_argument(
+        "--tickers",
+        nargs="+",
+        help="Small ticker list for panel mode, for example AAPL MSFT",
+    )
     parser.add_argument(
         "--source-table",
         default=DEFAULT_SOURCE_TABLE,
@@ -144,8 +251,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--output-table",
-        default=DEFAULT_OUTPUT_TABLE,
-        help=f"Output table to replace (default: {DEFAULT_OUTPUT_TABLE})",
+        default=None,
+        help=(
+            f"Output table to replace (single default: {DEFAULT_OUTPUT_TABLE}; "
+            f"panel default: {DEFAULT_PANEL_OUTPUT_TABLE})"
+        ),
     )
     parser.add_argument(
         "--rsi-window",
@@ -168,27 +278,45 @@ def main() -> int:
             "C = RSI EMA recency"
         ),
     )
+    parser.add_argument("--start-date", default=None, help="Optional source start date")
+    parser.add_argument("--end-date", default=None, help="Optional source end date")
     args = parser.parse_args()
 
     conn = duckdb.connect(args.db)
     try:
-        dataset = build_one_ticker_dataset(
-            conn,
-            ticker=args.ticker,
-            source_table=args.source_table,
-            rsi_window=args.rsi_window,
-            horizon_days=args.horizon_days,
-            feature_set=args.feature_set,
-        )
-        rows_written = write_dataset_table(conn, dataset, output_table=args.output_table)
+        if args.ticker:
+            selected_tickers = [args.ticker.upper()]
+            output_table = args.output_table or DEFAULT_OUTPUT_TABLE
+            dataset = build_one_ticker_dataset(
+                conn,
+                ticker=args.ticker.upper(),
+                source_table=args.source_table,
+                rsi_window=args.rsi_window,
+                horizon_days=args.horizon_days,
+                feature_set=args.feature_set,
+            )
+        else:
+            selected_tickers = normalize_tickers(args.tickers)
+            output_table = args.output_table or DEFAULT_PANEL_OUTPUT_TABLE
+            dataset = build_panel_dataset(
+                conn,
+                tickers=selected_tickers,
+                source_table=args.source_table,
+                rsi_window=args.rsi_window,
+                horizon_days=args.horizon_days,
+                feature_set=args.feature_set,
+                start_date=args.start_date,
+                end_date=args.end_date,
+            )
+        rows_written = write_dataset_table(conn, dataset, output_table=output_table)
     finally:
         conn.close()
 
     logger.info(
         "Wrote %s rows for %s to %s",
         f"{rows_written:,}",
-        args.ticker,
-        args.output_table,
+        ", ".join(selected_tickers),
+        output_table,
     )
     return 0
 
