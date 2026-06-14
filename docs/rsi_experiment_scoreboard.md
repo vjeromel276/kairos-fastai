@@ -20,8 +20,30 @@ validation and test results beat the relevant baseline out of sample.
 | RSI-015-B-cls | one_ticker | AAPL | B | logistic_regression | winner_5d | 2015-01-02..2021-12-31 | 2022-04-04..2023-12-29 | 2024-04-03..2026-06-05 | AUC 0.5891, accuracy 0.5571 | AUC 0.5098, accuracy 0.5812 | watch | Only feature set with a positive test AUC and small accuracy edge over always-up; too small for model D justification. | local `/tmp/aapl_rsi_abc_20260612.json` | RSI-015 |
 | RSI-015-C-reg | one_ticker | AAPL | C | linear_regression | future_5d_return | 2015-01-02..2021-12-31 | 2022-04-04..2023-12-29 | 2024-04-03..2026-06-05 | RMSE 0.0382, IC 0.0917 | RMSE 0.0409, IC -0.0282 | no | Best validation RMSE, but worse than the test mean-return baseline. | local `/tmp/aapl_rsi_abc_20260612.json` | RSI-015 |
 | RSI-015-C-cls | one_ticker | AAPL | C | logistic_regression | winner_5d | 2015-01-02..2021-12-31 | 2022-04-04..2023-12-29 | 2024-04-03..2026-06-05 | AUC 0.5912, accuracy 0.5525 | AUC 0.4893, accuracy 0.5756 | no | Best validation AUC, but test AUC fell below 0.5. | local `/tmp/aapl_rsi_abc_20260612.json` | RSI-015 |
+| RSI-D-AAPL-reg | one_ticker | AAPL | D | linear_regression | future_5d_return | 2015-01-02..2021-12-31 | 2022-04-04..2023-12-29 | 2024-04-03..2026-06-05 | RMSE 0.0382, IC 0.0802 | RMSE 0.0409, IC -0.0169 | no | Combining slopes and RSI EMAs did not fix regression generalization. | local `/tmp/aapl_rsi_abcd_20260612.json` | 8672138 |
+| RSI-D-AAPL-cls | one_ticker | AAPL | D | logistic_regression | winner_5d | 2015-01-02..2021-12-31 | 2022-04-04..2023-12-29 | 2024-04-03..2026-06-05 | AUC 0.5870, accuracy 0.5571 | AUC 0.5122, accuracy 0.5830 | watch | Small AAPL-only test edge, but needs panel confirmation before keeping. | local `/tmp/aapl_rsi_abcd_20260612.json` | 8672138 |
+| RSI-D-panel-reg | panel | 20 large-cap tickers | D | linear_regression | future_5d_return | 2015-01-02..2021-12-31 | 2022-04-04..2023-12-29 | 2024-04-03..2026-06-05 | IC 0.0479, top-5 return 0.0028 | IC 0.0301, top-5 return 0.0049 | no | Validation lift did not translate into stronger test ranking; A and C ranked better on test. | local `/tmp/panel20_rsi_d_20260612.json` | 8672138 |
+| RSI-D-panel-cls | panel | 20 large-cap tickers | D | logistic_regression | winner_5d | 2015-01-02..2021-12-31 | 2022-04-04..2023-12-29 | 2024-04-03..2026-06-05 | AUC 0.5083, top-5 return 0.0020 | AUC 0.4952, top-5 return 0.0042 | no | Test AUC fell below 0.5 and ranking trailed simpler feature sets. | local `/tmp/panel20_rsi_d_20260612.json` | 8672138 |
 
-## RSI Sequence Model D Decision
+## Combined Feature Set D Decision
+
+Decision: do not keep combined RSI slope plus RSI EMA recency as a standalone
+predictive model yet.
+
+The AAPL-only run gave a small classification test edge for D: AUC 0.5122 and
+accuracy 0.5830 versus the always-up baseline accuracy 0.5738. That did not
+generalize to the 20-ticker panel. In the panel test window, D classification
+AUC was 0.4952, and its top-5 average return was 0.0042. Simpler feature set A
+had panel test AUC 0.5195 and top-5 average return 0.0066; feature set C had
+panel test AUC 0.5133 and top-5 average return 0.0055.
+
+Interpretation: RSI-derived features may have weak ranking signal in this
+sample, but the combined feature set is not the best expression of it. Do not
+escalate to the sequence model from this result. The next useful experiment is
+to improve the panel design and add market or volatility context before adding
+model complexity.
+
+## RSI Sequence Model Decision
 
 Decision: defer the 20-day RSI sequence model.
 

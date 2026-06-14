@@ -206,7 +206,32 @@ This is similar to using EMA spreads, but applied to RSI instead of price.
 
 ---
 
-## Feature Set D: RSI Sequence Window
+## Feature Set D: RSI Slope + EMA Recency
+
+Combine the slope and recency-weighted RSI feature families.
+
+Columns:
+
+```text
+rsi_14
+rsi_slope_3
+rsi_slope_5
+rsi_slope_10
+rsi_slope_20
+rsi_ema_5
+rsi_ema_10
+rsi_ema_20
+rsi_ema_5_minus_10
+rsi_ema_5_minus_20
+```
+
+Purpose:
+
+> Test whether RSI slope and RSI EMA recency features are complementary or redundant.
+
+---
+
+## Future Sequence Model: RSI Sequence Window
 
 Instead of engineered columns, provide the model a sequence of RSI values.
 
@@ -214,18 +239,6 @@ Example:
 
 ```text
 Last 20 days of RSI → future 5-day return
-```
-
-Input shape for neural network:
-
-```python
-X.shape = (samples, lookback_days, features_per_day)
-```
-
-For RSI-only:
-
-```python
-X.shape = (samples, 20, 1)
 ```
 
 A single sample contains:
@@ -243,6 +256,9 @@ future_5d_return from T to T+5
 Purpose:
 
 > Test whether a neural network can learn the useful shape of recent RSI history without manually engineered slope or EMA features.
+
+Do not build this until the tabular RSI feature sets show stable panel-level
+out-of-sample signal.
 
 ---
 
@@ -419,7 +435,9 @@ Track every feature set and model combination.
 | B2         | RSI slopes          | LightGBM            | direction |               TBD |         TBD | TBD   |
 | C1         | RSI EMA features    | Linear Regression   | 5d return |               TBD |         TBD | TBD   |
 | C2         | RSI EMA features    | LightGBM            | direction |               TBD |         TBD | TBD   |
-| D1         | 20-day RSI sequence | 1D CNN              | 5d return |               TBD |         TBD | TBD   |
+| D1         | RSI slopes + EMA    | Linear Regression   | 5d return |               TBD |         TBD | TBD   |
+| D2         | RSI slopes + EMA    | Logistic Regression | direction |               TBD |         TBD | TBD   |
+| S1         | 20-day RSI sequence | 1D CNN              | 5d return |               TBD |         TBD | TBD   |
 
 ---
 

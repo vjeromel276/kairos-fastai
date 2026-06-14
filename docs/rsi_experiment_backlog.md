@@ -366,7 +366,7 @@ Test plan:
 Suggested commit:
 - `gate rsi experiments on source freshness`
 
-### RSI-015: Decide Whether To Try Sequence Model D
+### RSI-015: Decide Whether To Try Sequence Model
 
 Status: Done
 
