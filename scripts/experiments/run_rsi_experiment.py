@@ -143,7 +143,7 @@ def run_experiment(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Build a one-ticker RSI dataset and run A/B/C baseline comparisons",
+        description="Build a one-ticker RSI dataset and run A/B/C/D baseline comparisons",
     )
     parser.add_argument("--db", required=True, type=Path, help="Path to DuckDB database")
     parser.add_argument("--ticker", required=True, help="Ticker to run, for example AAPL")

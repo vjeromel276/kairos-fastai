@@ -48,8 +48,15 @@ DEFAULT_PRIOR_HORIZON_DAYS = 5
 FEATURE_SET_A = "A"
 FEATURE_SET_B = "B"
 FEATURE_SET_C = "C"
+FEATURE_SET_D = "D"
 FEATURE_SET_ALL = "ALL"
-FEATURE_SET_CHOICES = (FEATURE_SET_A, FEATURE_SET_B, FEATURE_SET_C, FEATURE_SET_ALL)
+FEATURE_SET_CHOICES = (
+    FEATURE_SET_A,
+    FEATURE_SET_B,
+    FEATURE_SET_C,
+    FEATURE_SET_D,
+    FEATURE_SET_ALL,
+)
 FEATURE_SET_COLUMNS = {
     FEATURE_SET_A: [DEFAULT_FEATURE_COLUMN],
     FEATURE_SET_B: [
@@ -61,6 +68,18 @@ FEATURE_SET_COLUMNS = {
     ],
     FEATURE_SET_C: [
         DEFAULT_FEATURE_COLUMN,
+        "rsi_ema_5",
+        "rsi_ema_10",
+        "rsi_ema_20",
+        "rsi_ema_5_minus_10",
+        "rsi_ema_5_minus_20",
+    ],
+    FEATURE_SET_D: [
+        DEFAULT_FEATURE_COLUMN,
+        "rsi_slope_3",
+        "rsi_slope_5",
+        "rsi_slope_10",
+        "rsi_slope_20",
         "rsi_ema_5",
         "rsi_ema_10",
         "rsi_ema_20",
@@ -501,7 +520,12 @@ def run_feature_set_comparison(
     embargo: int | None = None,
     embargo_unit: str = "trading",
 ) -> dict[str, Any]:
-    selected_feature_sets = feature_sets or [FEATURE_SET_A, FEATURE_SET_B, FEATURE_SET_C]
+    selected_feature_sets = feature_sets or [
+        FEATURE_SET_A,
+        FEATURE_SET_B,
+        FEATURE_SET_C,
+        FEATURE_SET_D,
+    ]
     results = {
         feature_set: run_one_ticker_baselines(
             conn,
@@ -681,7 +705,7 @@ def run_panel_models(
     top_k: int = 10,
 ) -> dict[str, Any]:
     if feature_set == FEATURE_SET_ALL:
-        raise ValueError("panel mode requires one feature set: A, B, or C")
+        raise ValueError("panel mode requires one feature set: A, B, C, or D")
     df = load_panel_dataset(conn, table_name=table_name, tickers=tickers)
     feature_columns = feature_columns_for_set(feature_set)
     return {
@@ -801,7 +825,7 @@ def main() -> int:
         "--feature-set",
         choices=FEATURE_SET_CHOICES,
         default=FEATURE_SET_A,
-        help="Feature set to train: A, B, C, or ALL for comparison",
+        help="Feature set to train: A, B, C, D, or ALL for comparison",
     )
     parser.add_argument("--train-start", default=None, help="Optional train start date")
     parser.add_argument("--train-end", required=True, help="Train window end date")

@@ -162,6 +162,34 @@ def test_feature_set_c_adds_rsi_ema_recency_columns(tmp_path) -> None:
     pd.testing.assert_frame_equal(original_known, changed_known)
 
 
+def test_feature_set_d_adds_slope_and_ema_columns(tmp_path) -> None:
+    db_path = tmp_path / "rsi-feature-set-d.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_sep_base(conn)
+        dataset = builder.build_one_ticker_dataset(
+            conn,
+            "AAPL",
+            rsi_window=3,
+            feature_set="D",
+        )
+    finally:
+        conn.close()
+
+    expected_columns = {
+        "rsi_slope_3",
+        "rsi_slope_5",
+        "rsi_slope_10",
+        "rsi_slope_20",
+        "rsi_ema_5",
+        "rsi_ema_10",
+        "rsi_ema_20",
+        "rsi_ema_5_minus_10",
+        "rsi_ema_5_minus_20",
+    }
+    assert expected_columns.issubset(dataset.columns)
+
+
 def test_main_runs_against_temp_duckdb_fixture(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "rsi-main.duckdb"
     conn = duckdb.connect(str(db_path))

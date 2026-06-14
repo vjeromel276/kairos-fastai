@@ -84,7 +84,7 @@ def test_feature_set_comparison_uses_same_splits_and_targets(tmp_path) -> None:
     finally:
         conn.close()
 
-    assert set(summary["feature_sets"]) == {"A", "B", "C"}
+    assert set(summary["feature_sets"]) == {"A", "B", "C", "D"}
     assert summary["feature_sets"]["A"]["regression"]["feature_columns"] == ["rsi_14"]
     assert summary["feature_sets"]["B"]["regression"]["feature_columns"] == [
         "rsi_14",
@@ -95,6 +95,18 @@ def test_feature_set_comparison_uses_same_splits_and_targets(tmp_path) -> None:
     ]
     assert summary["feature_sets"]["C"]["regression"]["feature_columns"] == [
         "rsi_14",
+        "rsi_ema_5",
+        "rsi_ema_10",
+        "rsi_ema_20",
+        "rsi_ema_5_minus_10",
+        "rsi_ema_5_minus_20",
+    ]
+    assert summary["feature_sets"]["D"]["regression"]["feature_columns"] == [
+        "rsi_14",
+        "rsi_slope_3",
+        "rsi_slope_5",
+        "rsi_slope_10",
+        "rsi_slope_20",
         "rsi_ema_5",
         "rsi_ema_10",
         "rsi_ema_20",
@@ -117,13 +129,13 @@ def test_feature_set_comparison_uses_same_splits_and_targets(tmp_path) -> None:
         result["regression"]["split_ranges"]
         for result in summary["feature_sets"].values()
     ]
-    assert regression_split_ranges[0] == regression_split_ranges[1] == regression_split_ranges[2]
+    assert all(split_range == regression_split_ranges[0] for split_range in regression_split_ranges)
 
     comparison = summary["validation_comparison"]
-    assert set(comparison["regression_rmse"]["values"]) == {"A", "B", "C"}
-    assert set(comparison["regression_rmse"]["improves_over_a"]) == {"B", "C"}
-    assert set(comparison["classification_auc"]["values"]) == {"A", "B", "C"}
-    assert set(comparison["classification_auc"]["improves_over_a"]) == {"B", "C"}
+    assert set(comparison["regression_rmse"]["values"]) == {"A", "B", "C", "D"}
+    assert set(comparison["regression_rmse"]["improves_over_a"]) == {"B", "C", "D"}
+    assert set(comparison["classification_auc"]["values"]) == {"A", "B", "C", "D"}
+    assert set(comparison["classification_auc"]["improves_over_a"]) == {"B", "C", "D"}
 
 
 def test_feature_set_all_cli_writes_comparable_metrics(monkeypatch, tmp_path) -> None:
@@ -162,6 +174,6 @@ def test_feature_set_all_cli_writes_comparable_metrics(monkeypatch, tmp_path) ->
     assert trainer.main() == 0
 
     summary = json.loads(metrics_path.read_text())
-    assert set(summary["feature_sets"]) == {"A", "B", "C"}
+    assert set(summary["feature_sets"]) == {"A", "B", "C", "D"}
     assert "validation_comparison" in summary
     assert "best_feature_set" in summary["validation_comparison"]["regression_rmse"]

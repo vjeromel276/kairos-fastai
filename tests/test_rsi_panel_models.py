@@ -17,6 +17,15 @@ def seed_panel_model_table(conn: duckdb.DuckDBPyConnection, duplicate: bool = Fa
             date DATE,
             closeadj DOUBLE,
             rsi_14 DOUBLE,
+            rsi_slope_3 DOUBLE,
+            rsi_slope_5 DOUBLE,
+            rsi_slope_10 DOUBLE,
+            rsi_slope_20 DOUBLE,
+            rsi_ema_5 DOUBLE,
+            rsi_ema_10 DOUBLE,
+            rsi_ema_20 DOUBLE,
+            rsi_ema_5_minus_10 DOUBLE,
+            rsi_ema_5_minus_20 DOUBLE,
             future_5d_return DOUBLE,
             winner_5d BIGINT
         )
@@ -38,6 +47,15 @@ def seed_panel_model_table(conn: duckdb.DuckDBPyConnection, duplicate: bool = Fa
                     trading_date,
                     100.0 + offset + rsi / 100.0,
                     rsi,
+                    rsi - 50.0,
+                    rsi - 48.0,
+                    rsi - 46.0,
+                    rsi - 44.0,
+                    rsi + 1.0,
+                    rsi - 1.0,
+                    rsi - 2.0,
+                    2.0,
+                    3.0,
                     future_return,
                     int(future_return > 0),
                 )
@@ -45,7 +63,7 @@ def seed_panel_model_table(conn: duckdb.DuckDBPyConnection, duplicate: bool = Fa
     if duplicate:
         rows.append(rows[0])
     conn.executemany(
-        "INSERT INTO rsi_experiment_panel_v1 VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO rsi_experiment_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rows,
     )
 
@@ -107,6 +125,41 @@ def test_panel_models_use_global_date_splits_and_ranking_metrics(tmp_path) -> No
     assert validation_ranking["mean_information_coefficient"] == pytest.approx(1.0)
     assert test_ranking["top_k_average_return"] == pytest.approx(0.02)
     assert test_ranking["top_k_win_rate"] == pytest.approx(1.0)
+
+
+def test_panel_models_accept_combined_feature_set_d(tmp_path) -> None:
+    db_path = tmp_path / "rsi-panel-models-d.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_panel_model_table(conn)
+        summary = trainer.run_panel_models(
+            conn,
+            tickers=["AAPL", "MSFT", "GOOG"],
+            table_name="rsi_experiment_panel_v1",
+            feature_set="D",
+            train_end="2026-01-04",
+            validation_end="2026-01-06",
+            test_end="2026-01-08",
+            embargo=0,
+            top_k=1,
+        )
+    finally:
+        conn.close()
+
+    assert summary["feature_set"] == "D"
+    assert summary["regression"]["feature_columns"] == [
+        "rsi_14",
+        "rsi_slope_3",
+        "rsi_slope_5",
+        "rsi_slope_10",
+        "rsi_slope_20",
+        "rsi_ema_5",
+        "rsi_ema_10",
+        "rsi_ema_20",
+        "rsi_ema_5_minus_10",
+        "rsi_ema_5_minus_20",
+    ]
+    assert summary["regression"]["split_ranges"] == summary["classification"]["split_ranges"]
 
 
 def test_panel_models_reject_duplicate_ticker_dates(tmp_path) -> None:

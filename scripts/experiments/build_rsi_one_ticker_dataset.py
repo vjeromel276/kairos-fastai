@@ -38,8 +38,15 @@ DEFAULT_HORIZON_DAYS = 5
 FEATURE_SET_A = "A"
 FEATURE_SET_B = "B"
 FEATURE_SET_C = "C"
+FEATURE_SET_D = "D"
 FEATURE_SET_ALL = "ALL"
-FEATURE_SET_CHOICES = (FEATURE_SET_A, FEATURE_SET_B, FEATURE_SET_C, FEATURE_SET_ALL)
+FEATURE_SET_CHOICES = (
+    FEATURE_SET_A,
+    FEATURE_SET_B,
+    FEATURE_SET_C,
+    FEATURE_SET_D,
+    FEATURE_SET_ALL,
+)
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -151,9 +158,9 @@ def add_feature_columns(
     result[rsi_column] = calculate_rsi(result["closeadj"], window=rsi_window)
 
     normalized_feature_set = feature_set.upper()
-    if normalized_feature_set in (FEATURE_SET_B, FEATURE_SET_ALL):
+    if normalized_feature_set in (FEATURE_SET_B, FEATURE_SET_D, FEATURE_SET_ALL):
         result = add_rsi_slope_features(result, rsi_column=rsi_column)
-    if normalized_feature_set in (FEATURE_SET_C, FEATURE_SET_ALL):
+    if normalized_feature_set in (FEATURE_SET_C, FEATURE_SET_D, FEATURE_SET_ALL):
         result = add_rsi_ema_features(result, rsi_column=rsi_column)
     if normalized_feature_set not in FEATURE_SET_CHOICES:
         raise ValueError(f"feature_set must be one of: {', '.join(FEATURE_SET_CHOICES)}")
@@ -276,7 +283,8 @@ def main() -> int:
         default=FEATURE_SET_A,
         help=(
             "Feature set to build: A = RSI today, B = RSI slopes, "
-            "C = RSI EMA recency, ALL = all RSI feature columns"
+            "C = RSI EMA recency, D = RSI slopes plus EMA recency, "
+            "ALL = all RSI feature columns"
         ),
     )
     parser.add_argument("--start-date", default=None, help="Optional source start date")

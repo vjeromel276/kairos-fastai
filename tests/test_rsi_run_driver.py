@@ -65,7 +65,7 @@ def test_rsi_run_driver_builds_dataset_and_writes_metrics(
     assert metrics_path.exists()
 
     summary = json.loads(metrics_path.read_text())
-    assert set(summary["feature_sets"]) == {"A", "B", "C"}
+    assert set(summary["feature_sets"]) == {"A", "B", "C", "D"}
 
     conn = duckdb.connect(str(db_path))
     try:
