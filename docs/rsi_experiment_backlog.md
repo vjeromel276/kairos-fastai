@@ -33,7 +33,7 @@ dataset only after RSI, target alignment, metrics, and time splits are tested.
 
 ### RSI-001: Add Tested RSI Feature Helpers
 
-Status: Open
+Status: Done
 
 Scope:
 - Add a small RSI feature module under `scripts/experiments/`.
@@ -57,7 +57,7 @@ Suggested commit:
 
 ### RSI-002: Build One-Ticker RSI Dataset CLI
 
-Status: Open
+Status: Done
 
 Scope:
 - Add a CLI that reads `sep_base` from DuckDB for one ticker.
@@ -83,7 +83,7 @@ Suggested commit:
 
 ### RSI-003: Add Dataset Alignment And Quality Checks
 
-Status: Open
+Status: Done
 
 Scope:
 - Add a small read-only checker for RSI experiment tables.
@@ -106,7 +106,7 @@ Suggested commit:
 
 ### RSI-004: Add Time Split And Embargo Utilities
 
-Status: Open
+Status: Done
 
 Scope:
 - Add reusable time-based split helpers for experiment tables.
@@ -130,7 +130,7 @@ Suggested commit:
 
 ### RSI-005: Add Evaluation Metric Helpers And Naive Baselines
 
-Status: Open
+Status: Done
 
 Scope:
 - Add reusable regression metrics: MAE, RMSE, prediction/actual correlation, and information coefficient.
@@ -155,7 +155,7 @@ Suggested commit:
 
 ### RSI-006: Train One-Ticker RSI-Today Baselines
 
-Status: Open
+Status: Done
 
 Scope:
 - Add a CLI to train model A1 and A2 on one ticker:
@@ -181,7 +181,7 @@ Suggested commit:
 
 ### RSI-007: Add RSI Slope Feature Set B
 
-Status: Open
+Status: Done
 
 Scope:
 - Extend the dataset builder to include:
@@ -206,7 +206,7 @@ Suggested commit:
 
 ### RSI-008: Add RSI EMA Recency Feature Set C
 
-Status: Open
+Status: Done
 
 Scope:
 - Extend the dataset builder to include:
@@ -232,7 +232,7 @@ Suggested commit:
 
 ### RSI-009: Compare One-Ticker Feature Sets A, B, And C
 
-Status: Open
+Status: Done
 
 Scope:
 - Extend the model CLI to select feature set A, B, or C.
@@ -254,7 +254,7 @@ Suggested commit:
 
 ### RSI-010: Expand Dataset Builder To A Ticker Panel
 
-Status: Open
+Status: Done
 
 Scope:
 - Add panel mode to build RSI features for many tickers.
@@ -277,7 +277,7 @@ Suggested commit:
 
 ### RSI-011: Add Panel Model Evaluation
 
-Status: Open
+Status: Done
 
 Scope:
 - Extend the model CLI to train and evaluate on panel data.
@@ -302,7 +302,7 @@ Suggested commit:
 
 ### RSI-012: Add Experiment Scoreboard Updates
 
-Status: Open
+Status: Done
 
 Scope:
 - Add a tracked Markdown scoreboard or a small JSON/CSV summary template.
@@ -324,7 +324,7 @@ Suggested commit:
 
 ### RSI-013: Add Reproducible Run Script
 
-Status: Open
+Status: Done
 
 Scope:
 - Add a shell script or Python driver that runs the current best one-ticker experiment from dataset build through model evaluation.
@@ -346,7 +346,7 @@ Suggested commit:
 
 ### RSI-014: Gate RSI Experiments On Source Freshness
 
-Status: Open
+Status: Done
 
 Scope:
 - Before running real experiments against `data/kairos-fastai.duckdb`, call or document the pre-model freshness gate.
@@ -368,7 +368,7 @@ Suggested commit:
 
 ### RSI-015: Decide Whether To Try Sequence Model D
 
-Status: Open
+Status: Done
 
 Scope:
 - Review results from feature sets A, B, and C.
