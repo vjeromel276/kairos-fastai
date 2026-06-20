@@ -145,7 +145,7 @@ Evidence:
 
 ### MFF-003: Define Factor Dataset Contract
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add a Markdown or JSON schema contract for the future factor panel table.
@@ -166,6 +166,12 @@ Test plan:
 
 Suggested commit:
 - `define factor dataset contract`
+
+Evidence:
+- Added `docs/factor_dataset_contract.md`.
+- Defined row grain, required 21-day and 5-day adjusted-return targets,
+  feature-bucket prefixes, manifest fields, panel names, null handling, and
+  pre-model validation requirements.
 
 ### MFF-004: Add Factor Dataset Quality Checker Skeleton
 
