@@ -205,7 +205,7 @@ Evidence:
 
 ### MFF-005: Add Baseline Panel Target Builder
 
-Status: Draft
+Status: Done
 
 Scope:
 - Build a small, tested panel target table from adjusted prices.
@@ -225,6 +225,13 @@ Test plan:
 
 Suggested commit:
 - `add factor panel targets`
+
+Evidence:
+- Added `scripts/experiments/build_factor_targets.py`.
+- Added `tests/test_factor_targets.py`.
+- Target builder creates 21-trading-day and 5-trading-day adjusted forward
+  returns, winner labels, and prior-return baselines without crossing ticker
+  boundaries.
 
 ### MFF-006: Add Shared Time Split And Embargo Contract For Factor Models
 
