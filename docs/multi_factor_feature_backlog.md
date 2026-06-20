@@ -326,7 +326,7 @@ Evidence:
 
 ### MFF-009: Add Cross-Sectional Context Feature Bucket
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add date-level cross-sectional ranks and relative features:
@@ -348,6 +348,13 @@ Test plan:
 
 Suggested commit:
 - `add cross sectional context features`
+
+Evidence:
+- Added `scripts/experiments/cross_sectional_features.py`.
+- Added `tests/test_cross_sectional_features.py`.
+- Cross-sectional helpers add date-local percentile ranks, winsorized z-scores,
+  exact-date `SPY` relative features, and sector-relative features with null
+  fallback when sector metadata is unavailable.
 
 ### MFF-010: Add Volume And Liquidity Feature Bucket
 
