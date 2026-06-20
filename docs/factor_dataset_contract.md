@@ -127,7 +127,7 @@ factor_feature_manifest_v1
 | cross-sectional context | Safe for date-level ranks computed only within date `T`; sector-relative diagnostics remain static-metadata caveats. |
 | volume/liquidity | Safe when built from `sep_base` rows through `T`. |
 | volatility/risk | Safe when rolling windows end at `T`; `SPY` comes from `sfp`. |
-| fundamental quality | Blocked until the SF1 point-in-time policy is explicitly implemented. |
+| fundamental quality | Usable only through the documented SF1 point-in-time policy: `datekey` availability, fallback report-date lag, and `lastupdated` gating. |
 | valuation | Daily ratios from `daily` are usable with documented caution; reconstructed SF1 valuation is blocked until SF1 PIT policy exists. |
 | regime context | Safe for `SPY` trend/drawdown/volatility from `sfp` through `T`; breadth requires a reviewed panel. |
 

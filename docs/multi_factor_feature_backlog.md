@@ -424,7 +424,7 @@ Evidence:
 
 ### MFF-012: Add Fundamental Quality Feature Bucket
 
-Status: Draft
+Status: Done
 
 Scope:
 - Build fundamental quality features from point-in-time safe fundamentals:
@@ -449,6 +449,15 @@ Test plan:
 
 Suggested commit:
 - `add fundamental quality features`
+
+Evidence:
+- Added `docs/fundamental_quality_feature_policy.md`.
+- Added `scripts/experiments/fundamental_quality_features.py`.
+- Added `tests/test_fundamental_quality_features.py`.
+- Fundamental quality features include margins, returns on assets/equity,
+  ROIC, revenue growth, earnings growth, and debt-to-assets, joined by ticker
+  with an as-of policy that uses `datekey`, fallback report-date lag, and
+  `lastupdated` gating.
 
 ### MFF-013: Add Valuation Feature Bucket
 
