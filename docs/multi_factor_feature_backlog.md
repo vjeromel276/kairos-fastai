@@ -293,7 +293,7 @@ Evidence:
 
 ### MFF-008: Add Price Behavior Feature Bucket
 
-Status: Draft
+Status: Done
 
 Scope:
 - Build price behavior features from adjusted prices:
@@ -316,6 +316,13 @@ Test plan:
 
 Suggested commit:
 - `add price behavior features`
+
+Evidence:
+- Added `scripts/experiments/price_behavior_features.py`.
+- Added `tests/test_price_behavior_features.py`.
+- Price behavior features include adjusted-price returns, moving-average
+  distance, rolling-high drawdown, and short-term reversal without crossing
+  ticker boundaries.
 
 ### MFF-009: Add Cross-Sectional Context Feature Bucket
 
