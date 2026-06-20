@@ -358,7 +358,7 @@ Evidence:
 
 ### MFF-010: Add Volume And Liquidity Feature Bucket
 
-Status: Draft
+Status: Done
 
 Scope:
 - Build volume/liquidity features where source data allows:
@@ -380,6 +380,14 @@ Test plan:
 
 Suggested commit:
 - `add volume liquidity features`
+
+Evidence:
+- Added `scripts/experiments/volume_liquidity_features.py`.
+- Added `tests/test_volume_liquidity_features.py`.
+- Volume/liquidity features include dollar volume, rolling volume averages,
+  rolling average dollar volume, relative volume, turnover proxies from shares
+  or market cap, liquidity eligibility flags, and graceful missing-source
+  behavior.
 
 ### MFF-011: Add Volatility And Risk Feature Bucket
 
