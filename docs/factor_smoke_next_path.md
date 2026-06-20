@@ -44,6 +44,10 @@ Blocking evidence:
 
 Start a blocker-fix backlog before adding model complexity:
 
+```text
+docs/factor_smoke_bug_backlog.md
+```
+
 - Define per-bucket required and optional feature policy.
 - Exclude, split out, or separately evaluate features that are all-null or too
   sparse for a given training window.
