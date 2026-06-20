@@ -441,7 +441,7 @@ Validation result:
 
 ### FSM-011: Run Turnover And Capacity Diagnostics
 
-Status: Draft
+Status: Done
 
 Scope:
 - Run turnover, holding-overlap, transaction-cost, and selected-name liquidity
@@ -459,6 +459,19 @@ Test plan:
 
 Suggested commit:
 - `record factor smoke turnover diagnostics`
+
+Evidence:
+- Added `docs/factor_smoke_turnover_capacity.md`.
+- Ran turnover, cost, and liquidity/capacity diagnostics on
+  `factor_smoke_scores_v1`.
+- Recorded average turnover, holding overlap, missing score days,
+  cost-adjusted top-K return, and selected-name liquidity summary.
+- Stored the full daily local report at
+  `local_artifacts/factor_smoke_v1/turnover_capacity_smoke_report.json`.
+
+Validation result:
+- `python scripts/experiments/turnover_capacity_metrics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --target-column future_21d_return --liquidity-column liq_adv_20d --top-k 5 --cost-bps 10` passed with output captured at `local_artifacts/factor_smoke_v1/turnover_capacity_smoke_report.json`.
+- `git diff --check` passed.
 
 ### FSM-012: Record First Smoke Scoreboard Decision
 
