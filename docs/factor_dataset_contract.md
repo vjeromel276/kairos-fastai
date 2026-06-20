@@ -128,7 +128,7 @@ factor_feature_manifest_v1
 | volume/liquidity | Safe when built from `sep_base` rows through `T`. |
 | volatility/risk | Safe when rolling windows end at `T`; `SPY` comes from `sfp`. |
 | fundamental quality | Usable only through the documented SF1 point-in-time policy: `datekey` availability, fallback report-date lag, and `lastupdated` gating. |
-| valuation | Daily ratios from `daily` are usable with documented caution; reconstructed SF1 valuation is blocked until SF1 PIT policy exists. |
+| valuation | Daily ratios from `daily` must join on exact `(ticker, date)`; optional SF1 cash-flow yield must use the MFF-012 PIT policy. |
 | regime context | Safe for `SPY` trend/drawdown/volatility from `sfp` through `T`; breadth requires a reviewed panel. |
 
 ## Null Handling

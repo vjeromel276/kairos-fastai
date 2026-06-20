@@ -89,7 +89,7 @@ history.
 | volume/liquidity | `sep_base`, future `universe_fastai_v1` | yes | Use contemporaneous `closeadj * volume` and trailing averages through `T`. |
 | volatility/risk | `sep_base`, `sfp`/`SPY`, `trading_calendar` | yes | Realized volatility and beta must use lagged rolling windows ending at `T`. |
 | fundamental quality | `sf1` | yes, through the MFF-012 PIT policy | Prefer `datekey` as availability date. If `datekey` is unavailable, use a conservative report-date lag. Require `lastupdated <= T` by default. |
-| valuation | `daily`; optionally `sf1` + `sep_base` | partially | `daily` ratios are date-stamped and easiest for first valuation features. Ratios may still reflect vendor restatements; use with caution and document this risk. |
+| valuation | `daily`; optionally `sf1` cash flow | yes, through the MFF-013 policy | `daily` ratios join on exact `(ticker, date)`. Optional `sf1` cash-flow numerators use the MFF-012 PIT policy and `daily.marketcap` at `T`. |
 | regime context | `sfp`/`SPY`, `sep_base`, future panel breadth | yes for SPY regimes; breadth later | SPY trend/drawdown/volatility can be known by `T`; breadth requires a reviewed panel build. |
 
 ## Source Table Notes
@@ -125,9 +125,9 @@ ticker, date, lastupdated, ev, evebit, evebitda, marketcap, pb, pe, ps
 ```
 
 Use for first-pass valuation features because it provides daily date-stamped
-ratios. Treat this as easier and safer than reconstructing ratios from raw
-fundamentals at first, but still document possible restatement/vendor revision
-risk.
+ratios. MFF-013 joins these rows on exact `(ticker, date)` without forward fill.
+Treat this as easier and safer than reconstructing ratios from raw fundamentals
+at first, but still document possible restatement/vendor revision risk.
 
 ### `sf1`
 

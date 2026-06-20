@@ -461,7 +461,7 @@ Evidence:
 
 ### MFF-013: Add Valuation Feature Bucket
 
-Status: Draft
+Status: Done
 
 Scope:
 - Build valuation features:
@@ -484,6 +484,15 @@ Test plan:
 
 Suggested commit:
 - `add valuation features`
+
+Evidence:
+- Added `docs/valuation_feature_policy.md`.
+- Added `scripts/experiments/valuation_features.py`.
+- Added `tests/test_valuation_features.py`.
+- Valuation features include earnings, sales, book, EBIT/EV, EBITDA/EV, and
+  free-cash-flow yields with configurable capping, exact-date `daily` joins,
+  zero-denominator null handling, and optional SF1 cash-flow numerators using
+  the MFF-012 point-in-time policy.
 
 ### MFF-014: Add Regime Context Feature Bucket
 
