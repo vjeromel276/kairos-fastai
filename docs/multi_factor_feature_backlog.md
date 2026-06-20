@@ -593,7 +593,7 @@ Evidence:
 
 ### MFF-017: Add Bucket-Only Model Harness
 
-Status: Draft
+Status: Done
 
 Scope:
 - Train diagnostic models using one bucket at a time.
@@ -614,6 +614,13 @@ Test plan:
 
 Suggested commit:
 - `add bucket only model harness`
+
+Evidence:
+- Added `scripts/experiments/bucket_model_harness.py`.
+- Added `tests/test_bucket_model_harness.py`.
+- The harness runs ridge regression diagnostics one bucket at a time using
+  shared chronological date splits, panel ranking metrics, top-K return and win
+  rate, information coefficient, and prior-return baseline comparison.
 
 ### MFF-018: Add Cumulative Bucket Ablation Harness
 
