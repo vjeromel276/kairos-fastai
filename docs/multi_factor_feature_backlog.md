@@ -691,7 +691,7 @@ Evidence:
 
 ### MFF-020: Add Turnover And Capacity Proxy Metrics
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add metrics for:
@@ -712,6 +712,13 @@ Test plan:
 
 Suggested commit:
 - `add turnover capacity metrics`
+
+Evidence:
+- Added `scripts/experiments/turnover_capacity_metrics.py`.
+- Added `tests/test_turnover_capacity_metrics.py`.
+- Metrics report top-K holdings by score, daily turnover, holding overlap,
+  gross and transaction-cost-adjusted returns, missing score days, and selected
+  name liquidity summaries for scoreboard recording.
 
 ### MFF-021: Add Walk-Forward Evaluation Driver
 
