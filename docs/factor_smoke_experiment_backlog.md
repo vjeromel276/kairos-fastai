@@ -475,7 +475,7 @@ Validation result:
 
 ### FSM-012: Record First Smoke Scoreboard Decision
 
-Status: Draft
+Status: Done
 
 Scope:
 - Update `docs/factor_experiment_scoreboard.md` with a compact result row or
@@ -496,6 +496,20 @@ Test plan:
 
 Suggested commit:
 - `record first factor smoke decision`
+
+Evidence:
+- Updated `docs/factor_experiment_scoreboard.md`.
+- Added the first reviewed large-cap smoke row for
+  `price_behavior + regime_context`.
+- Recorded model, target, split windows, validation/test summaries, turnover,
+  cost-adjusted return, selected-name liquidity, artifact paths, and decision.
+- Set the decision to `watch`, not `yes`, because this is smoke-panel evidence,
+  sector diagnostics are unavailable, and sparse buckets still need a feature
+  policy.
+
+Validation result:
+- `python -m pytest tests/test_factor_scoreboard_schema.py` passed.
+- `git diff --check` passed.
 
 ### FSM-013: Choose Next Path
 
