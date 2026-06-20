@@ -172,7 +172,7 @@ Evidence:
 
 ### FSM-004: Run Factor Panel Quality Gate
 
-Status: Draft
+Status: Done
 
 Scope:
 - Run the dataset quality checker against `factor_panel_large_cap_smoke_v1`.
@@ -192,6 +192,15 @@ Test plan:
 
 Suggested commit:
 - `record factor smoke quality gate`
+
+Evidence:
+- Added `docs/factor_smoke_quality_gate.md`.
+- Re-ran the factor dataset quality checker on
+  `factor_panel_large_cap_smoke_v1`; result was valid.
+- Confirmed zero duplicate keys, valid target/winner alignment, and no blocking
+  quality issues.
+- Recorded non-blocking warnings for null `liq_turnover`, sparse strict-PIT
+  fundamentals, sparse `val_fcf_yield`, and raw carry-through columns.
 
 ### FSM-005: Run Feature Redundancy And Missingness Diagnostics
 
