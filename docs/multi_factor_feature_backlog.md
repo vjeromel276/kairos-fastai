@@ -235,7 +235,7 @@ Evidence:
 
 ### MFF-006: Add Shared Time Split And Embargo Contract For Factor Models
 
-Status: Draft
+Status: Done
 
 Scope:
 - Reuse or generalize the RSI time split helpers for factor panel experiments.
@@ -254,6 +254,13 @@ Test plan:
 
 Suggested commit:
 - `share time splits for factor models`
+
+Evidence:
+- Added `scripts/experiments/factor_time_splits.py`.
+- Added `tests/test_factor_time_splits.py`.
+- Factor split wrapper reuses the existing chronological split helper with
+  factor defaults of 252 trading days of feature lookback and 21 trading days
+  of prediction horizon.
 
 ### MFF-007: Add Factor Scoreboard Template
 
