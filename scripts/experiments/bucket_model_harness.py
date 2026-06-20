@@ -212,6 +212,7 @@ def evaluate_bucket_regression(
         }
 
     return {
+        "status": "computed",
         "model": "ridge_regression",
         "alpha": alpha,
         "feature_columns": feature_columns,
@@ -240,6 +241,10 @@ def run_bucket_only_models(
 ) -> dict[str, Any]:
     if target_horizon < 1:
         raise ValueError("target_horizon must be >= 1")
+    if top_k < 1:
+        raise ValueError("top_k must be >= 1")
+    if alpha < 0:
+        raise ValueError("alpha must be >= 0")
     selected_buckets = parse_buckets(list(buckets))
     df = load_factor_panel(conn, table_name=table_name, tickers=tickers)
     target_column = f"future_{target_horizon}d_return"
@@ -263,14 +268,28 @@ def run_bucket_only_models(
     results = {}
     for bucket in selected_buckets:
         features = bucket_feature_columns(df, bucket)
-        results[bucket] = evaluate_bucket_regression(
-            base_splits,
-            feature_columns=features,
-            target_column=target_column,
-            prior_column=prior_column if prior_column in df.columns else None,
-            top_k=top_k,
-            alpha=alpha,
-        )
+        try:
+            results[bucket] = evaluate_bucket_regression(
+                base_splits,
+                feature_columns=features,
+                target_column=target_column,
+                prior_column=prior_column if prior_column in df.columns else None,
+                top_k=top_k,
+                alpha=alpha,
+            )
+        except ValueError as exc:
+            required_columns = features + [target_column]
+            complete_splits = {
+                split_name: split_df.dropna(subset=required_columns).copy()
+                for split_name, split_df in base_splits.items()
+            }
+            results[bucket] = {
+                "status": "skipped",
+                "reason": str(exc),
+                "feature_columns": features,
+                "target": target_column,
+                "complete_split_ranges": split_ranges(complete_splits),
+            }
 
     return {
         "mode": "bucket_only",

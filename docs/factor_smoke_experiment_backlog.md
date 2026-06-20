@@ -233,7 +233,7 @@ Evidence:
 
 ### FSM-006: Run Bucket-Only Smoke Models
 
-Status: Draft
+Status: Done
 
 Scope:
 - Run bucket-only ridge diagnostics on the smoke panel.
@@ -252,6 +252,23 @@ Test plan:
 
 Suggested commit:
 - `record bucket only smoke results`
+
+Evidence:
+- Added `docs/factor_smoke_bucket_only_results.md`.
+- Ran bucket-only ridge diagnostics on `factor_panel_large_cap_smoke_v1`.
+- Recorded validation and test top-K return, top-K win rate, and information
+  coefficient for price behavior, cross-sectional context, volatility/risk,
+  and regime context.
+- Recorded skipped bucket reasons for volume/liquidity, fundamental quality,
+  and valuation where complete training rows were unavailable.
+- Hardened the bucket-only harness so no-complete-row buckets are recorded as
+  skipped instead of aborting the full smoke run.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_bucket_model_harness.py` passed.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSM-007: Run Cumulative Bucket Ablations
 

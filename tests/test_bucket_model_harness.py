@@ -11,6 +11,7 @@ from scripts.experiments import bucket_model_harness as harness
 def seed_factor_model_table(
     conn: duckdb.DuckDBPyConnection,
     include_volume: bool = True,
+    all_null_volume: bool = False,
 ) -> None:
     volume_column = ", liq_signal DOUBLE" if include_volume else ""
     conn.execute(
@@ -44,7 +45,7 @@ def seed_factor_model_table(
                         trading_date,
                         "unit",
                         signal,
-                        signal * 10.0,
+                        None if all_null_volume else signal * 10.0,
                         future_return,
                         int(future_return > 0),
                         prior_return,
@@ -91,6 +92,8 @@ def test_bucket_only_models_use_same_global_splits_and_ranking_metrics(tmp_path)
 
     price = summary["buckets"]["price_behavior"]
     volume = summary["buckets"]["volume_liquidity"]
+    assert price["status"] == "computed"
+    assert volume["status"] == "computed"
     assert price["feature_columns"] == ["px_signal"]
     assert volume["feature_columns"] == ["liq_signal"]
     assert price["complete_split_ranges"] == volume["complete_split_ranges"]
@@ -119,6 +122,30 @@ def test_bucket_only_models_reject_missing_bucket_features(tmp_path) -> None:
             )
     finally:
         conn.close()
+
+
+def test_bucket_only_models_record_bucket_with_no_complete_rows(tmp_path) -> None:
+    db_path = tmp_path / "bucket-models-null-volume.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_factor_model_table(conn, all_null_volume=True)
+        summary = harness.run_bucket_only_models(
+            conn,
+            buckets=("price", "volume"),
+            train_end="2026-01-04",
+            validation_end="2026-01-06",
+            test_end="2026-01-08",
+            embargo=0,
+            top_k=1,
+        )
+    finally:
+        conn.close()
+
+    assert summary["buckets"]["price_behavior"]["status"] == "computed"
+    skipped = summary["buckets"]["volume_liquidity"]
+    assert skipped["status"] == "skipped"
+    assert skipped["reason"] == "train split has no complete rows"
+    assert skipped["complete_split_ranges"]["train"]["rows"] == 0
 
 
 def test_bucket_model_harness_cli_prints_report(monkeypatch, tmp_path, capsys) -> None:
