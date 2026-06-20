@@ -722,7 +722,7 @@ Evidence:
 
 ### MFF-021: Add Walk-Forward Evaluation Driver
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add a driver for repeated train/validation/test windows.
@@ -741,6 +741,13 @@ Test plan:
 
 Suggested commit:
 - `add walk forward factor evaluation`
+
+Evidence:
+- Added `scripts/experiments/walk_forward_factor_driver.py`.
+- Added `tests/test_walk_forward_factor_driver.py`.
+- The driver creates chronological walk-forward train/validation/test folds,
+  runs bucket-only evaluations per fold, records each fold's date ranges and
+  metrics, and aggregates validation/test ranking metrics across folds.
 
 ### MFF-022: Add Simple Tree-Based Model Option
 
