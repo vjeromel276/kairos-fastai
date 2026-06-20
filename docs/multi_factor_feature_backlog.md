@@ -175,7 +175,7 @@ Evidence:
 
 ### MFF-004: Add Factor Dataset Quality Checker Skeleton
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add a read-only checker for future factor panel tables.
@@ -195,6 +195,13 @@ Test plan:
 
 Suggested commit:
 - `add factor dataset quality checks`
+
+Evidence:
+- Added `scripts/experiments/check_factor_dataset_quality.py`.
+- Added `tests/test_factor_dataset_quality.py`.
+- The checker reports duplicate keys, null key counts, feature null counts,
+  target availability, target/winner consistency, unclassified columns, and
+  bucket-level availability by feature prefix.
 
 ### MFF-005: Add Baseline Panel Target Builder
 
