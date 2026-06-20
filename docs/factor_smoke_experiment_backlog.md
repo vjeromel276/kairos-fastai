@@ -408,7 +408,7 @@ Validation result:
 
 ### FSM-010: Run Neutrality Diagnostics
 
-Status: Draft
+Status: Done
 
 Scope:
 - Run full-panel, sector-neutral, sector-breakdown, and beta-adjusted ranking
@@ -426,6 +426,18 @@ Test plan:
 
 Suggested commit:
 - `record factor smoke neutrality diagnostics`
+
+Evidence:
+- Added `docs/factor_smoke_neutrality_diagnostics.md`.
+- Ran neutrality diagnostics on `factor_smoke_scores_v1`.
+- Recorded full-panel top-K ranking metrics.
+- Recorded beta-adjusted ranking metrics using `risk_beta_spy_21d`.
+- Recorded sector diagnostics as explicitly skipped because `sector` is not
+  available in the scored smoke table.
+
+Validation result:
+- `python scripts/experiments/factor_neutrality_diagnostics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --target-column future_21d_return --beta-column risk_beta_spy_21d --top-k 5` passed.
+- `git diff --check` passed.
 
 ### FSM-011: Run Turnover And Capacity Diagnostics
 
