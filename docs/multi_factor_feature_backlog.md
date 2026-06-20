@@ -117,7 +117,7 @@ Suggested commit:
 
 ### MFF-002: Inventory Available Source Tables And Point-In-Time Limits
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add a read-only inventory note for available DuckDB tables and columns needed
@@ -137,6 +137,11 @@ Test plan:
 
 Suggested commit:
 - `document multi factor source inventory`
+
+Evidence:
+- Added `docs/multi_factor_source_inventory.md`.
+- Ran the source DB audit command and mapped each planned bucket to current
+  local tables, readiness, and point-in-time limitations.
 
 ### MFF-003: Define Factor Dataset Contract
 
