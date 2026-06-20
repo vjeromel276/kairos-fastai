@@ -22,9 +22,12 @@ from scripts.experiments.bucket_model_harness import (  # noqa: E402
     DEFAULT_BUCKETS,
     complete_split_rows,
     evaluate_bucket_regression,
+    feature_policy_for_bucket_stack,
     json_safe,
     load_factor_panel,
     parse_buckets,
+    select_feature_columns_for_policy,
+    skipped_feature_policy_summary,
 )
 from scripts.experiments.check_factor_dataset_quality import (  # noqa: E402
     BUCKET_PREFIXES,
@@ -227,8 +230,13 @@ def run_cumulative_bucket_ablations(
     steps = []
     for bucket in selected_buckets:
         candidate_buckets = accepted_buckets + [bucket]
-        candidate_features = features_for_bucket_stack(df, candidate_buckets)
+        feature_policy = feature_policy_for_bucket_stack(df, candidate_buckets)
         try:
+            candidate_features, feature_policy_summary = select_feature_columns_for_policy(
+                base_splits,
+                feature_policy,
+                target_column,
+            )
             prior_result, candidate_result, comparison_ranges = evaluate_stack_pair(
                 base_splits,
                 candidate_features=candidate_features,
@@ -238,10 +246,16 @@ def run_cumulative_bucket_ablations(
                 top_k=top_k,
                 alpha=alpha,
             )
+            candidate_result["feature_policy"] = feature_policy_summary
         except ValueError as exc:
+            feature_policy_summary = skipped_feature_policy_summary(
+                base_splits,
+                feature_policy,
+                target_column,
+            )
             comparison_ranges = complete_split_ranges_for_columns(
                 base_splits,
-                candidate_features + [target_column],
+                feature_policy_summary["model_feature_columns"] + [target_column],
             )
             steps.append(
                 {
@@ -252,9 +266,12 @@ def run_cumulative_bucket_ablations(
                     "candidate": {
                         "status": "skipped",
                         "reason": str(exc),
-                        "feature_columns": candidate_features,
+                        "feature_columns": feature_policy_summary[
+                            "model_feature_columns"
+                        ],
                         "target": target_column,
                         "complete_split_ranges": comparison_ranges,
+                        "feature_policy": feature_policy_summary,
                     },
                     "prior_comparison": None,
                     "comparison_split_ranges": comparison_ranges,

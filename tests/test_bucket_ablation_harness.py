@@ -10,15 +10,19 @@ from scripts.experiments import bucket_ablation_harness as ablations
 def seed_ablation_table(
     conn: duckdb.DuckDBPyConnection,
     all_null_volume: bool = False,
+    include_turnover: bool = False,
+    all_null_turnover: bool = True,
 ) -> None:
+    turnover_column = ", liq_turnover DOUBLE" if include_turnover else ""
     conn.execute(
-        """
+        f"""
         CREATE TABLE factor_panel_v1 (
             ticker VARCHAR,
             date DATE,
             panel_name VARCHAR,
             px_signal DOUBLE,
-            liq_signal DOUBLE,
+            liq_signal DOUBLE
+            {turnover_column},
             future_21d_return DOUBLE,
             winner_21d BIGINT,
             prior_21d_return DOUBLE
@@ -35,21 +39,27 @@ def seed_ablation_table(
     for offset in range(8):
         trading_date = start + timedelta(days=offset)
         for ticker, px_signal, liq_signal, future_return, prior_return in specs:
-            rows.append(
-                (
-                    ticker,
-                    trading_date,
-                    "unit",
-                    px_signal,
-                    None
-                    if all_null_volume or trading_date == date(2026, 1, 5)
-                    else liq_signal,
+            row = [
+                ticker,
+                trading_date,
+                "unit",
+                px_signal,
+                None
+                if all_null_volume or trading_date == date(2026, 1, 5)
+                else liq_signal,
+            ]
+            if include_turnover:
+                row.append(None if all_null_turnover else liq_signal * 0.01)
+            row.extend(
+                [
                     future_return,
                     int(future_return > 0),
                     prior_return,
-                )
+                ]
             )
-    conn.executemany("INSERT INTO factor_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+            rows.append(tuple(row))
+    placeholders = ", ".join(["?"] * (9 if include_turnover else 8))
+    conn.executemany(f"INSERT INTO factor_panel_v1 VALUES ({placeholders})", rows)
 
 
 def test_cumulative_ablations_report_deltas_and_keep_decisions(tmp_path) -> None:
@@ -139,6 +149,34 @@ def test_cumulative_ablations_record_sparse_candidate_as_reject(tmp_path) -> Non
     assert second["candidate"]["reason"] == "train split has no complete rows"
     assert second["comparison_split_ranges"]["train"]["rows"] == 0
     assert second["prior_comparison"] is None
+
+
+def test_cumulative_ablations_skip_optional_feature_without_rejecting_bucket(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "bucket-ablations-optional.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_ablation_table(conn, include_turnover=True, all_null_turnover=True)
+        summary = ablations.run_cumulative_bucket_ablations(
+            conn,
+            bucket_order=("price", "volume"),
+            train_end="2026-01-04",
+            validation_end="2026-01-06",
+            test_end="2026-01-08",
+            embargo=0,
+            top_k=1,
+        )
+    finally:
+        conn.close()
+
+    second = summary["steps"][1]
+    assert second["candidate"]["status"] == "computed"
+    assert second["candidate"]["feature_columns"] == ["px_signal", "liq_signal"]
+    policy = second["candidate"]["feature_policy"]
+    assert policy["optional_columns"] == ["liq_turnover"]
+    assert policy["used_optional_columns"] == []
+    assert policy["skipped_optional_columns"][0]["column"] == "liq_turnover"
 
 
 def test_candidate_recommendation_marks_test_degradation_watch() -> None:

@@ -59,6 +59,14 @@ DEFAULT_BUCKETS = (
     "valuation",
     "regime_context",
 )
+OPTIONAL_FEATURES_BY_BUCKET = {
+    # Turnover depends on share-count or market-cap inputs that may be absent in
+    # a smoke panel. It should not suppress the rest of the liquidity bucket.
+    "volume_liquidity": {"liq_turnover"},
+    # The valuation policy documents cash-flow yield as optional because it
+    # combines daily valuation data with PIT fundamentals.
+    "valuation": {"val_fcf_yield"},
+}
 
 
 def normalize_bucket(bucket: str) -> str:
@@ -117,6 +125,64 @@ def bucket_feature_columns(df: pd.DataFrame, bucket: str) -> list[str]:
     return columns
 
 
+def bucket_feature_policy(df: pd.DataFrame, bucket: str) -> dict[str, Any]:
+    bucket_name = normalize_bucket(bucket)
+    all_columns = bucket_feature_columns(df, bucket_name)
+    optional_names = OPTIONAL_FEATURES_BY_BUCKET.get(bucket_name, set())
+    optional_columns = [column for column in all_columns if column in optional_names]
+    required_columns = [column for column in all_columns if column not in optional_names]
+    if not required_columns:
+        raise ValueError(f"no required feature columns found for bucket: {bucket_name}")
+    return {
+        "bucket": bucket_name,
+        "all_feature_columns": all_columns,
+        "required_columns": required_columns,
+        "optional_columns": optional_columns,
+    }
+
+
+def feature_policy_for_bucket_stack(
+    df: pd.DataFrame,
+    buckets: list[str],
+) -> dict[str, Any]:
+    bucket_policies = [bucket_feature_policy(df, bucket) for bucket in buckets]
+    return {
+        "buckets": bucket_policies,
+        "all_feature_columns": list(
+            dict.fromkeys(
+                column
+                for policy in bucket_policies
+                for column in policy["all_feature_columns"]
+            )
+        ),
+        "required_columns": list(
+            dict.fromkeys(
+                column
+                for policy in bucket_policies
+                for column in policy["required_columns"]
+            )
+        ),
+        "optional_columns": list(
+            dict.fromkeys(
+                column
+                for policy in bucket_policies
+                for column in policy["optional_columns"]
+            )
+        ),
+    }
+
+
+def complete_split_ranges_without_raise(
+    splits: dict[str, pd.DataFrame],
+    required_columns: list[str],
+) -> dict[str, dict[str, Any]]:
+    complete = {
+        split_name: split_df.dropna(subset=required_columns).copy()
+        for split_name, split_df in splits.items()
+    }
+    return split_ranges(complete)
+
+
 def complete_split_rows(
     splits: dict[str, pd.DataFrame],
     required_columns: list[str],
@@ -127,6 +193,97 @@ def complete_split_rows(
     if complete["train"].empty:
         raise ValueError("train split has no complete rows")
     return complete
+
+
+def optional_feature_status(
+    complete_required_splits: dict[str, pd.DataFrame],
+    feature_column: str,
+) -> dict[str, Any]:
+    coverage = {}
+    is_complete = True
+    for split_name, split_df in complete_required_splits.items():
+        row_count = int(len(split_df))
+        non_null_rows = int(split_df[feature_column].notna().sum())
+        missing_rows = row_count - non_null_rows
+        if missing_rows:
+            is_complete = False
+        coverage[split_name] = {
+            "rows": row_count,
+            "non_null_rows": non_null_rows,
+            "missing_rows": missing_rows,
+        }
+    if is_complete:
+        return {
+            "column": feature_column,
+            "status": "used",
+            "coverage": coverage,
+        }
+    return {
+        "column": feature_column,
+        "status": "skipped",
+        "reason": "optional feature has missing values in required-complete rows",
+        "coverage": coverage,
+    }
+
+
+def select_feature_columns_for_policy(
+    splits: dict[str, pd.DataFrame],
+    feature_policy: dict[str, Any],
+    target_column: str,
+) -> tuple[list[str], dict[str, Any]]:
+    required_columns = list(feature_policy["required_columns"])
+    optional_columns = list(feature_policy["optional_columns"])
+    complete_required_splits = complete_split_rows(
+        splits,
+        required_columns + [target_column],
+    )
+
+    used_optional_columns: list[str] = []
+    skipped_optional_columns: list[dict[str, Any]] = []
+    for optional_column in optional_columns:
+        status = optional_feature_status(complete_required_splits, optional_column)
+        if status["status"] == "used":
+            used_optional_columns.append(optional_column)
+        else:
+            skipped_optional_columns.append(status)
+
+    model_feature_columns = required_columns + used_optional_columns
+    return model_feature_columns, {
+        "all_feature_columns": list(feature_policy["all_feature_columns"]),
+        "required_columns": required_columns,
+        "optional_columns": optional_columns,
+        "used_optional_columns": used_optional_columns,
+        "skipped_optional_columns": skipped_optional_columns,
+        "model_feature_columns": model_feature_columns,
+        "required_complete_split_ranges": split_ranges(complete_required_splits),
+    }
+
+
+def skipped_feature_policy_summary(
+    splits: dict[str, pd.DataFrame],
+    feature_policy: dict[str, Any],
+    target_column: str,
+) -> dict[str, Any]:
+    required_columns = list(feature_policy["required_columns"])
+    return {
+        "all_feature_columns": list(feature_policy["all_feature_columns"]),
+        "required_columns": required_columns,
+        "optional_columns": list(feature_policy["optional_columns"]),
+        "used_optional_columns": [],
+        "skipped_optional_columns": [
+            {
+                "column": column,
+                "status": "not_evaluated",
+                "reason": "required feature rows unavailable",
+            }
+            for column in feature_policy["optional_columns"]
+        ],
+        "model_feature_columns": required_columns,
+        "required_complete_split_ranges": complete_split_ranges_without_raise(
+            splits,
+            required_columns + [target_column],
+        ),
+    }
 
 
 def nan_delta(left: object, right: object) -> float:
@@ -267,8 +424,13 @@ def run_bucket_only_models(
     global_split_ranges = split_ranges(base_splits)
     results = {}
     for bucket in selected_buckets:
-        features = bucket_feature_columns(df, bucket)
+        feature_policy = feature_policy_for_bucket_stack(df, [bucket])
         try:
+            features, policy_summary = select_feature_columns_for_policy(
+                base_splits,
+                feature_policy,
+                target_column,
+            )
             results[bucket] = evaluate_bucket_regression(
                 base_splits,
                 feature_columns=features,
@@ -277,18 +439,22 @@ def run_bucket_only_models(
                 top_k=top_k,
                 alpha=alpha,
             )
+            results[bucket]["feature_policy"] = policy_summary
         except ValueError as exc:
-            required_columns = features + [target_column]
-            complete_splits = {
-                split_name: split_df.dropna(subset=required_columns).copy()
-                for split_name, split_df in base_splits.items()
-            }
+            policy_summary = skipped_feature_policy_summary(
+                base_splits,
+                feature_policy,
+                target_column,
+            )
             results[bucket] = {
                 "status": "skipped",
                 "reason": str(exc),
-                "feature_columns": features,
+                "feature_columns": policy_summary["model_feature_columns"],
                 "target": target_column,
-                "complete_split_ranges": split_ranges(complete_splits),
+                "complete_split_ranges": policy_summary[
+                    "required_complete_split_ranges"
+                ],
+                "feature_policy": policy_summary,
             }
 
     return {

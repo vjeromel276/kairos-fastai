@@ -89,6 +89,53 @@ def seed_walk_forward_table_with_null_volume(conn: duckdb.DuckDBPyConnection) ->
     )
 
 
+def seed_walk_forward_table_with_sparse_optional_turnover(
+    conn: duckdb.DuckDBPyConnection,
+) -> None:
+    conn.execute(
+        """
+        CREATE TABLE factor_panel_v1 (
+            ticker VARCHAR,
+            date DATE,
+            panel_name VARCHAR,
+            px_signal DOUBLE,
+            liq_signal DOUBLE,
+            liq_turnover DOUBLE,
+            future_21d_return DOUBLE,
+            winner_21d BIGINT,
+            prior_21d_return DOUBLE
+        )
+        """
+    )
+    start = date(2026, 1, 1)
+    specs = [
+        ("AAPL", 1.0, 10.0, 0.03, 0.01),
+        ("MSFT", 0.0, 8.0, 0.00, 0.00),
+        ("JPM", -1.0, 6.0, -0.02, -0.01),
+    ]
+    rows = []
+    for offset in range(10):
+        trading_date = start + timedelta(days=offset)
+        for ticker, signal, liquidity_signal, future_return, prior_return in specs:
+            rows.append(
+                (
+                    ticker,
+                    trading_date,
+                    "unit",
+                    signal,
+                    liquidity_signal,
+                    None,
+                    future_return,
+                    int(future_return > 0),
+                    prior_return,
+                )
+            )
+    conn.executemany(
+        "INSERT INTO factor_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+
+
 def test_make_walk_forward_folds_are_chronological() -> None:
     dates = [date(2026, 1, 1) + timedelta(days=offset) for offset in range(10)]
 
@@ -167,6 +214,36 @@ def test_walk_forward_aggregation_records_skipped_bucket_folds(tmp_path) -> None
     assert volume["status_counts"] == {"skipped": 2}
     assert volume["test"]["non_null_top_k_average_return_fold_count"] == 0
     assert math.isnan(volume["test"]["mean_top_k_average_return"])
+
+
+def test_walk_forward_computes_bucket_when_only_optional_feature_is_sparse(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "walk-forward-optional.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_walk_forward_table_with_sparse_optional_turnover(conn)
+        report = walk_forward.run_walk_forward_factor_evaluation(
+            conn,
+            buckets=("volume",),
+            train_size=4,
+            validation_size=2,
+            test_size=2,
+            step_size=2,
+            embargo=0,
+            top_k=1,
+        )
+    finally:
+        conn.close()
+
+    volume = report["aggregate_metrics"]["volume_liquidity"]
+    assert volume["status_counts"] == {"computed": 2}
+    assert volume["test"]["non_null_top_k_average_return_fold_count"] == 2
+    first_fold_volume = report["folds"][0]["summary"]["buckets"]["volume_liquidity"]
+    assert first_fold_volume["feature_columns"] == ["liq_signal"]
+    assert first_fold_volume["feature_policy"]["skipped_optional_columns"][0][
+        "column"
+    ] == "liq_turnover"
 
 
 def test_walk_forward_cli_prints_report(monkeypatch, tmp_path, capsys) -> None:

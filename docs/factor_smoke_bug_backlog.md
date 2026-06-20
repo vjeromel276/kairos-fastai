@@ -27,7 +27,7 @@ policy, and sector neutrality could not be checked.
 
 ### FSB-001: Full-Bucket Complete-Case Policy Makes Sparse Features Mandatory
 
-Status: Open
+Status: Done
 
 Severity: High
 
@@ -60,6 +60,27 @@ Test plan:
 
 Suggested commit:
 - `add factor bucket feature availability policy`
+
+Evidence:
+- Added `docs/factor_smoke_bug_fsb_001.md`.
+- Added a reviewed required/optional feature policy to the bucket evaluation
+  path.
+- Marked `liq_turnover` optional for `volume_liquidity` and `val_fcf_yield`
+  optional for `valuation`.
+- Updated bucket-only, cumulative ablation, and walk-forward paths to report
+  skipped optional features separately from skipped buckets.
+- Confirmed `volume_liquidity` and `valuation` now compute in fixed-split and
+  walk-forward smoke runs while `fundamental_quality` still skips because its
+  required features have no complete training rows.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_bucket_model_harness.py tests/test_bucket_ablation_harness.py tests/test_walk_forward_factor_driver.py` passed.
+- `python scripts/experiments/bucket_model_harness.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --buckets price volume volatility fundamental valuation regime cross_sectional --train-end 2021-12-31 --validation-end 2023-12-29 --test-end 2026-06-12 --embargo 21 --top-k 5` passed with output captured at `local_artifacts/factor_smoke_v1/fsb001_bucket_only_report.json`.
+- `python scripts/experiments/bucket_ablation_harness.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --bucket-order price cross_sectional volume volatility fundamental valuation regime --train-end 2021-12-31 --validation-end 2023-12-29 --test-end 2026-06-12 --embargo 21 --top-k 5` passed with output captured at `local_artifacts/factor_smoke_v1/fsb001_cumulative_ablation_report.json`.
+- `python scripts/experiments/walk_forward_factor_driver.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --buckets price volume volatility fundamental valuation regime cross_sectional --train-size 756 --validation-size 252 --test-size 252 --step-size 252 --embargo 21 --top-k 5` passed with output captured at `local_artifacts/factor_smoke_v1/fsb001_walk_forward_report.json`.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSB-002: Volume Bucket Is Blocked By All-Null `liq_turnover`
 

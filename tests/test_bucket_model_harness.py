@@ -12,8 +12,11 @@ def seed_factor_model_table(
     conn: duckdb.DuckDBPyConnection,
     include_volume: bool = True,
     all_null_volume: bool = False,
+    include_turnover: bool = False,
+    all_null_turnover: bool = True,
 ) -> None:
     volume_column = ", liq_signal DOUBLE" if include_volume else ""
+    turnover_column = ", liq_turnover DOUBLE" if include_turnover else ""
     conn.execute(
         f"""
         CREATE TABLE factor_panel_v1 (
@@ -21,7 +24,8 @@ def seed_factor_model_table(
             date DATE,
             panel_name VARCHAR,
             px_signal DOUBLE
-            {volume_column},
+            {volume_column}
+            {turnover_column},
             future_21d_return DOUBLE,
             winner_21d BIGINT,
             prior_21d_return DOUBLE
@@ -39,18 +43,23 @@ def seed_factor_model_table(
         trading_date = start + timedelta(days=offset)
         for ticker, signal, future_return, prior_return in specs:
             if include_volume:
-                rows.append(
-                    (
-                        ticker,
-                        trading_date,
-                        "unit",
-                        signal,
-                        None if all_null_volume else signal * 10.0,
+                row = [
+                    ticker,
+                    trading_date,
+                    "unit",
+                    signal,
+                    None if all_null_volume else signal * 10.0,
+                ]
+                if include_turnover:
+                    row.append(None if all_null_turnover else signal * 0.01)
+                row.extend(
+                    [
                         future_return,
                         int(future_return > 0),
                         prior_return,
-                    )
+                    ]
                 )
+                rows.append(tuple(row))
             else:
                 rows.append(
                     (
@@ -63,7 +72,12 @@ def seed_factor_model_table(
                         prior_return,
                     )
                 )
-    placeholders = ", ".join(["?"] * (8 if include_volume else 7))
+    column_count = 7
+    if include_volume:
+        column_count += 1
+    if include_turnover:
+        column_count += 1
+    placeholders = ", ".join(["?"] * column_count)
     conn.executemany(f"INSERT INTO factor_panel_v1 VALUES ({placeholders})", rows)
 
 
@@ -146,6 +160,39 @@ def test_bucket_only_models_record_bucket_with_no_complete_rows(tmp_path) -> Non
     assert skipped["status"] == "skipped"
     assert skipped["reason"] == "train split has no complete rows"
     assert skipped["complete_split_ranges"]["train"]["rows"] == 0
+
+
+def test_bucket_only_models_skip_sparse_optional_feature_without_skipping_bucket(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "bucket-models-optional-turnover.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_factor_model_table(conn, include_turnover=True, all_null_turnover=True)
+        summary = harness.run_bucket_only_models(
+            conn,
+            buckets=("volume",),
+            train_end="2026-01-04",
+            validation_end="2026-01-06",
+            test_end="2026-01-08",
+            embargo=0,
+            top_k=1,
+        )
+    finally:
+        conn.close()
+
+    volume = summary["buckets"]["volume_liquidity"]
+    assert volume["status"] == "computed"
+    assert volume["feature_columns"] == ["liq_signal"]
+    policy = volume["feature_policy"]
+    assert policy["required_columns"] == ["liq_signal"]
+    assert policy["optional_columns"] == ["liq_turnover"]
+    assert policy["used_optional_columns"] == []
+    assert policy["skipped_optional_columns"][0]["column"] == "liq_turnover"
+    assert (
+        policy["skipped_optional_columns"][0]["reason"]
+        == "optional feature has missing values in required-complete rows"
+    )
 
 
 def test_bucket_model_harness_cli_prints_report(monkeypatch, tmp_path, capsys) -> None:
