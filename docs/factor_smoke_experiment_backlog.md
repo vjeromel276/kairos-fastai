@@ -513,7 +513,7 @@ Validation result:
 
 ### FSM-013: Choose Next Path
 
-Status: Draft
+Status: Done
 
 Scope:
 - Review the smoke decision and choose the next path.
@@ -530,3 +530,13 @@ Test plan:
 
 Suggested commit:
 - `record factor smoke next path`
+
+Evidence:
+- Added `docs/factor_smoke_next_path.md`.
+- Chose the blocker-fix path instead of promotion or tree-based model work.
+- Decision references smoke evidence: positive large-cap ranking, low turnover,
+  strong liquidity, skipped sparse buckets, missing sector diagnostics, and
+  lack of universe-wide evidence.
+
+Validation result:
+- `git diff --check` passed.
