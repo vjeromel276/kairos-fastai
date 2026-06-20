@@ -561,7 +561,7 @@ Evidence:
 
 ### MFF-016: Add Feature Redundancy Diagnostics
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add read-only diagnostics for feature redundancy:
@@ -583,6 +583,13 @@ Test plan:
 
 Suggested commit:
 - `add feature redundancy diagnostics`
+
+Evidence:
+- Added `scripts/experiments/feature_redundancy_diagnostics.py`.
+- Added `tests/test_feature_redundancy_diagnostics.py`.
+- Diagnostics report feature missingness, missingness overlap, near-constant
+  features, high-correlation feature pairs, and bucket-level correlation
+  summaries without mutating or dropping model inputs.
 
 ### MFF-017: Add Bucket-Only Model Harness
 
