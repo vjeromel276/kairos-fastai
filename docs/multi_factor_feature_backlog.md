@@ -624,7 +624,7 @@ Evidence:
 
 ### MFF-018: Add Cumulative Bucket Ablation Harness
 
-Status: Draft
+Status: Done
 
 Scope:
 - Train cumulative models in a fixed order:
@@ -649,6 +649,14 @@ Test plan:
 
 Suggested commit:
 - `add cumulative bucket ablations`
+
+Evidence:
+- Added `scripts/experiments/bucket_ablation_harness.py`.
+- Added `tests/test_bucket_ablation_harness.py`.
+- Cumulative ablations evaluate bucket candidates in the fixed order against
+  the prior accepted stack, report validation and test deltas, expose test
+  degradation explicitly, and compare prior versus candidate models on the same
+  complete rows and chronological split windows.
 
 ### MFF-019: Add Sector-Neutral And Market-Neutral Ranking Diagnostics
 
