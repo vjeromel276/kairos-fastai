@@ -204,7 +204,7 @@ Evidence:
 
 ### FSM-005: Run Feature Redundancy And Missingness Diagnostics
 
-Status: Draft
+Status: Done
 
 Scope:
 - Run redundancy diagnostics on the smoke panel.
@@ -223,6 +223,13 @@ Test plan:
 
 Suggested commit:
 - `record factor smoke redundancy diagnostics`
+
+Evidence:
+- Added `docs/factor_smoke_redundancy_diagnostics.md`.
+- Ran feature redundancy diagnostics on `factor_panel_large_cap_smoke_v1`.
+- Recorded `liq_turnover` as all-null, identified 4 high-correlation pairs,
+  and documented the largest missingness-overlap risks.
+- No features were dropped automatically.
 
 ### FSM-006: Run Bucket-Only Smoke Models
 
