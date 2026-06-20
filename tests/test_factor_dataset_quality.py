@@ -103,6 +103,26 @@ def test_factor_quality_checker_reports_valid_panel(monkeypatch, tmp_path, capsy
     assert "Valid: True" in output
 
 
+def test_factor_quality_checker_reports_optional_turnover_status(tmp_path) -> None:
+    db_path = tmp_path / "factor-quality-turnover.duckdb"
+    build_factor_fixture(db_path)
+
+    conn = duckdb.connect(str(db_path))
+    try:
+        conn.execute("ALTER TABLE factor_panel_v1 ADD COLUMN liq_turnover DOUBLE")
+        report = quality.validate_factor_dataset_quality(conn)
+    finally:
+        conn.close()
+
+    turnover = report["feature_policy_availability"]["volume_liquidity"][
+        "optional_feature_status"
+    ]["liq_turnover"]
+    assert turnover["role"] == "optional"
+    assert turnover["status"] == "skipped"
+    assert turnover["non_null_rows"] == 0
+    assert turnover["reason"] == "optional feature all null"
+
+
 def test_factor_quality_checker_fails_on_duplicate_ticker_date(tmp_path) -> None:
     db_path = tmp_path / "factor-quality-duplicates.duckdb"
     build_factor_fixture(db_path)

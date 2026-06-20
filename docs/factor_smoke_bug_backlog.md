@@ -84,7 +84,7 @@ Validation result:
 
 ### FSB-002: Volume Bucket Is Blocked By All-Null `liq_turnover`
 
-Status: Open
+Status: Done
 
 Severity: High
 
@@ -118,6 +118,25 @@ Test plan:
 
 Suggested commit:
 - `fix volume turnover feature availability`
+
+Evidence:
+- Added `scripts/experiments/factor_feature_policy.py` so the model harness and
+  quality gate share the reviewed optional feature policy.
+- Added `docs/factor_smoke_bug_fsb_002.md`.
+- Updated the quality gate to report optional feature availability.
+- Confirmed `liq_turnover` is recorded as optional and skipped because it is
+  all-null in `factor_panel_large_cap_smoke_v1`.
+- Confirmed the volume/liquidity bucket computes using the remaining 10
+  required liquidity features.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_factor_dataset_quality.py tests/test_bucket_model_harness.py tests/test_bucket_ablation_harness.py tests/test_walk_forward_factor_driver.py` passed.
+- `python scripts/experiments/build_factor_panel.py --db data/kairos-fastai.duckdb --panel large_cap_fixed --buckets price volume volatility fundamental valuation regime cross_sectional --output-table factor_panel_large_cap_smoke_v1` passed.
+- `python scripts/experiments/check_factor_dataset_quality.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1` passed with output captured at `local_artifacts/factor_smoke_v1/fsb002_quality_report.txt`.
+- `python scripts/experiments/bucket_model_harness.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --buckets volume --train-end 2021-12-31 --validation-end 2023-12-29 --test-end 2026-06-12 --embargo 21 --top-k 5` passed with output captured at `local_artifacts/factor_smoke_v1/fsb002_volume_bucket_report.json`.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSB-003: Fundamental Quality Bucket Has No Train/Validation Coverage
 

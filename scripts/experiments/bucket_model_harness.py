@@ -24,6 +24,9 @@ from scripts.experiments.check_factor_dataset_quality import (  # noqa: E402
     BUCKET_PREFIXES,
     DEFAULT_TABLE,
 )
+from scripts.experiments.factor_feature_policy import (  # noqa: E402
+    optional_features_for_bucket,
+)
 from scripts.experiments.factor_time_splits import make_factor_time_splits  # noqa: E402
 from scripts.experiments.rsi_metrics import regression_metrics  # noqa: E402
 from scripts.experiments.train_rsi_one_ticker_baselines import (  # noqa: E402
@@ -59,16 +62,6 @@ DEFAULT_BUCKETS = (
     "valuation",
     "regime_context",
 )
-OPTIONAL_FEATURES_BY_BUCKET = {
-    # Turnover depends on share-count or market-cap inputs that may be absent in
-    # a smoke panel. It should not suppress the rest of the liquidity bucket.
-    "volume_liquidity": {"liq_turnover"},
-    # The valuation policy documents cash-flow yield as optional because it
-    # combines daily valuation data with PIT fundamentals.
-    "valuation": {"val_fcf_yield"},
-}
-
-
 def normalize_bucket(bucket: str) -> str:
     normalized = bucket.strip().lower().replace("-", "_")
     if normalized not in BUCKET_ALIASES:
@@ -128,7 +121,7 @@ def bucket_feature_columns(df: pd.DataFrame, bucket: str) -> list[str]:
 def bucket_feature_policy(df: pd.DataFrame, bucket: str) -> dict[str, Any]:
     bucket_name = normalize_bucket(bucket)
     all_columns = bucket_feature_columns(df, bucket_name)
-    optional_names = OPTIONAL_FEATURES_BY_BUCKET.get(bucket_name, set())
+    optional_names = optional_features_for_bucket(bucket_name)
     optional_columns = [column for column in all_columns if column in optional_names]
     required_columns = [column for column in all_columns if column not in optional_names]
     if not required_columns:

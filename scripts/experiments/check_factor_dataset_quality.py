@@ -16,6 +16,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.experiments.factor_feature_policy import (  # noqa: E402
+    OPTIONAL_FEATURES_BY_BUCKET,
+)
+
 
 DEFAULT_TABLE = "factor_panel_v1"
 DEFAULT_TARGET_HORIZONS = (21, 5)
@@ -154,6 +158,61 @@ def bucket_availability(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
     return availability
 
 
+def optional_feature_quality_status(
+    df: pd.DataFrame,
+    column: str,
+) -> dict[str, Any]:
+    if column not in df.columns:
+        return {
+            "role": "optional",
+            "status": "missing",
+            "rows": len(df),
+            "non_null_rows": 0,
+            "null_rows": len(df),
+            "reason": "optional feature column missing",
+        }
+
+    non_null_rows = int(df[column].notna().sum())
+    row_count = int(len(df))
+    null_rows = row_count - non_null_rows
+    if non_null_rows == 0:
+        status = "skipped"
+        reason = "optional feature all null"
+    elif null_rows:
+        status = "partial"
+        reason = "optional feature has missing values"
+    else:
+        status = "computed"
+        reason = "optional feature fully populated"
+    return {
+        "role": "optional",
+        "status": status,
+        "rows": row_count,
+        "non_null_rows": non_null_rows,
+        "null_rows": null_rows,
+        "reason": reason,
+    }
+
+
+def feature_policy_availability(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    availability: dict[str, dict[str, Any]] = {}
+    for bucket, optional_features in OPTIONAL_FEATURES_BY_BUCKET.items():
+        prefix = BUCKET_PREFIXES[bucket]
+        bucket_columns = [column for column in df.columns if column.startswith(prefix)]
+        required_columns = [
+            column for column in bucket_columns if column not in optional_features
+        ]
+        availability[bucket] = {
+            "required_columns": required_columns,
+            "optional_columns": sorted(optional_features),
+            "optional_feature_status": {
+                column: optional_feature_quality_status(df, column)
+                for column in sorted(optional_features)
+            },
+        }
+    return availability
+
+
 def target_availability_counts(
     df: pd.DataFrame,
     target_horizons: tuple[int, ...],
@@ -216,6 +275,7 @@ def validate_factor_dataset_quality(
         "duplicate_key_count": 0,
         "feature_null_counts": {},
         "bucket_availability": {},
+        "feature_policy_availability": {},
         "target_availability": {},
         "unclassified_columns": [],
         "valid": False,
@@ -229,6 +289,7 @@ def validate_factor_dataset_quality(
     report["duplicate_key_count"] = duplicate_key_count(df)
     report["feature_null_counts"] = feature_null_counts(df[feature_columns])
     report["bucket_availability"] = bucket_availability(df)
+    report["feature_policy_availability"] = feature_policy_availability(df)
     report["target_availability"] = target_availability_counts(
         df,
         target_horizons=target_horizons,
@@ -275,6 +336,18 @@ def print_report(report: dict[str, Any]) -> None:
             f"rows_all={availability['rows_with_all_values']:,}, "
             f"null_values={availability['total_null_values']:,}"
         )
+
+    if report["feature_policy_availability"]:
+        print("Feature policy availability:")
+        for bucket, policy in report["feature_policy_availability"].items():
+            print(f"  {bucket}:")
+            for column, status in policy["optional_feature_status"].items():
+                print(
+                    f"    optional {column}: status={status['status']}, "
+                    f"non_null_rows={status['non_null_rows']:,}, "
+                    f"null_rows={status['null_rows']:,}, "
+                    f"reason={status['reason']}"
+                )
 
     if report["target_availability"]:
         print("Target availability:")

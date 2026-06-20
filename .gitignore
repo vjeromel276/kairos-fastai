@@ -1,5 +1,6 @@
 *.duckdb
 data/*
+local_artifacts/
 __pycache__/
 *.log
 *.csv
