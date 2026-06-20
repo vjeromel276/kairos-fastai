@@ -660,7 +660,7 @@ Evidence:
 
 ### MFF-019: Add Sector-Neutral And Market-Neutral Ranking Diagnostics
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add diagnostics that measure ranking results:
@@ -681,6 +681,13 @@ Test plan:
 
 Suggested commit:
 - `add factor neutrality diagnostics`
+
+Evidence:
+- Added `scripts/experiments/factor_neutrality_diagnostics.py`.
+- Added `tests/test_factor_neutrality_diagnostics.py`.
+- Diagnostics report full-panel ranking, sector-neutral ranking, sector
+  breakdowns, top-K sector concentration, beta-adjusted ranking when beta is
+  available, and explicit sector-skip status when sector metadata is missing.
 
 ### MFF-020: Add Turnover And Capacity Proxy Metrics
 
