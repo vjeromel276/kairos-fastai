@@ -496,7 +496,7 @@ Evidence:
 
 ### MFF-014: Add Regime Context Feature Bucket
 
-Status: Draft
+Status: Done
 
 Scope:
 - Build date-level regime features:
@@ -518,6 +518,13 @@ Test plan:
 
 Suggested commit:
 - `add regime context features`
+
+Evidence:
+- Added `scripts/experiments/regime_features.py`.
+- Added `tests/test_regime_features.py`.
+- Regime context features include SPY trailing returns, trend and above-moving-
+  average state, drawdown, realized volatility, risk-on score, exact-date panel
+  joins, and optional same-date market breadth proxies.
 
 ### MFF-015: Build Bucketed Factor Panel CLI
 
