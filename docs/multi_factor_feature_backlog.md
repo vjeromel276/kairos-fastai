@@ -528,7 +528,7 @@ Evidence:
 
 ### MFF-015: Build Bucketed Factor Panel CLI
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add a CLI that builds a panel table with selected feature buckets.
@@ -551,6 +551,13 @@ Test plan:
 
 Suggested commit:
 - `add bucketed factor panel builder`
+
+Evidence:
+- Added `scripts/experiments/build_factor_panel.py`.
+- Added `tests/test_build_factor_panel.py`.
+- The panel builder supports explicit bucket selection, fixed large-cap and
+  explicit `universe_fastai_v1` panels, ticker overrides, date filters, target
+  horizons, and DuckDB output with one row per `(ticker, date)`.
 
 ### MFF-016: Add Feature Redundancy Diagnostics
 
