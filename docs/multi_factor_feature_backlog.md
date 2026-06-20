@@ -264,7 +264,7 @@ Evidence:
 
 ### MFF-007: Add Factor Scoreboard Template
 
-Status: Draft
+Status: Done
 
 Scope:
 - Add a tracked scoreboard for bucket and combination results.
@@ -283,6 +283,13 @@ Test plan:
 
 Suggested commit:
 - `add factor experiment scoreboard`
+
+Evidence:
+- Added `docs/factor_experiment_scoreboard.md`.
+- Added `tests/test_factor_scoreboard_schema.py`.
+- Scoreboard records run type, panel name, bucket stack, feature count,
+  validation/test metrics, turnover, cost-adjusted results, liquidity summary,
+  artifact paths, and keep/reject decisions.
 
 ### MFF-008: Add Price Behavior Feature Bucket
 
