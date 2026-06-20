@@ -310,7 +310,7 @@ Validation result:
 
 ### FSM-008: Add Or Generate Scored Prediction Table
 
-Status: Draft
+Status: Done
 
 Scope:
 - Produce a scored panel table for the selected smoke candidate stack.
@@ -341,6 +341,29 @@ Test plan:
 
 Suggested commit:
 - `add factor smoke score export`
+
+Evidence:
+- Added `scripts/experiments/export_factor_scores.py`.
+- Added `tests/test_export_factor_scores.py`.
+- Added `docs/factor_smoke_score_export.md`.
+- Created local DuckDB table `factor_smoke_scores_v1` from the accepted smoke
+  stack `price_behavior + regime_context`.
+- Exported 21,039 validation/test scored rows with zero duplicate
+  `(ticker, date)` keys.
+- Included `prediction_score`, `future_21d_return`, `risk_beta_spy_21d`, and
+  `liq_adv_20d`; `sector` is unavailable in the current smoke panel and the
+  neutrality diagnostic skips it explicitly.
+- Ran neutrality and turnover/capacity diagnostics against
+  `factor_smoke_scores_v1`.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_export_factor_scores.py` passed.
+- `python scripts/experiments/factor_neutrality_diagnostics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --top-k 5` passed.
+- `python scripts/experiments/factor_neutrality_diagnostics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --beta-column risk_beta_spy_21d --top-k 5` passed.
+- `python scripts/experiments/turnover_capacity_metrics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --top-k 5` passed.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSM-009: Run Walk-Forward Smoke Evaluation
 
