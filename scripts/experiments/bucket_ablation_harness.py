@@ -104,15 +104,42 @@ def should_keep_candidate(
     min_validation_delta: float = DEFAULT_MIN_VALIDATION_DELTA,
     allowed_test_degradation: float = DEFAULT_ALLOWED_TEST_DEGRADATION,
 ) -> bool:
+    return (
+        candidate_recommendation(
+            deltas,
+            min_validation_delta=min_validation_delta,
+            allowed_test_degradation=allowed_test_degradation,
+        )
+        == "keep"
+    )
+
+
+def candidate_recommendation(
+    deltas: dict[str, Any],
+    min_validation_delta: float = DEFAULT_MIN_VALIDATION_DELTA,
+    allowed_test_degradation: float = DEFAULT_ALLOWED_TEST_DEGRADATION,
+) -> str:
     validation_delta = deltas["validation_top_k_average_return_delta"]
     test_delta = deltas["test_top_k_average_return_delta"]
     if validation_delta is None:
-        return True
+        return "keep"
     if math.isnan(validation_delta) or validation_delta <= min_validation_delta:
-        return False
+        return "reject"
     if test_delta is not None and not math.isnan(test_delta):
-        return test_delta >= -allowed_test_degradation
-    return True
+        if test_delta < -allowed_test_degradation:
+            return "watch"
+    return "keep"
+
+
+def complete_split_ranges_for_columns(
+    splits: dict[str, pd.DataFrame],
+    required_columns: list[str],
+) -> dict[str, dict[str, Any]]:
+    complete_splits = {
+        split_name: split_df.dropna(subset=required_columns).copy()
+        for split_name, split_df in splits.items()
+    }
+    return split_ranges(complete_splits)
 
 
 def evaluate_stack_pair(
@@ -169,6 +196,12 @@ def run_cumulative_bucket_ablations(
     min_validation_delta: float = DEFAULT_MIN_VALIDATION_DELTA,
     allowed_test_degradation: float = DEFAULT_ALLOWED_TEST_DEGRADATION,
 ) -> dict[str, Any]:
+    if target_horizon < 1:
+        raise ValueError("target_horizon must be >= 1")
+    if top_k < 1:
+        raise ValueError("top_k must be >= 1")
+    if alpha < 0:
+        raise ValueError("alpha must be >= 0")
     selected_buckets = parse_buckets(list(bucket_order))
     df = load_factor_panel(conn, table_name=table_name, tickers=tickers)
     target_column = f"future_{target_horizon}d_return"
@@ -195,16 +228,54 @@ def run_cumulative_bucket_ablations(
     for bucket in selected_buckets:
         candidate_buckets = accepted_buckets + [bucket]
         candidate_features = features_for_bucket_stack(df, candidate_buckets)
-        prior_result, candidate_result, comparison_ranges = evaluate_stack_pair(
-            base_splits,
-            candidate_features=candidate_features,
-            prior_features=accepted_features or None,
-            target_column=target_column,
-            prior_column=prior_column if prior_column in df.columns else None,
-            top_k=top_k,
-            alpha=alpha,
-        )
+        try:
+            prior_result, candidate_result, comparison_ranges = evaluate_stack_pair(
+                base_splits,
+                candidate_features=candidate_features,
+                prior_features=accepted_features or None,
+                target_column=target_column,
+                prior_column=prior_column if prior_column in df.columns else None,
+                top_k=top_k,
+                alpha=alpha,
+            )
+        except ValueError as exc:
+            comparison_ranges = complete_split_ranges_for_columns(
+                base_splits,
+                candidate_features + [target_column],
+            )
+            steps.append(
+                {
+                    "bucket": bucket,
+                    "candidate_stack": candidate_buckets,
+                    "prior_accepted_stack": candidate_buckets[:-1],
+                    "accepted_stack_after": accepted_buckets.copy(),
+                    "candidate": {
+                        "status": "skipped",
+                        "reason": str(exc),
+                        "feature_columns": candidate_features,
+                        "target": target_column,
+                        "complete_split_ranges": comparison_ranges,
+                    },
+                    "prior_comparison": None,
+                    "comparison_split_ranges": comparison_ranges,
+                    "deltas_vs_prior_accepted": {
+                        "validation_top_k_average_return_delta": None,
+                        "validation_mean_information_coefficient_delta": None,
+                        "test_top_k_average_return_delta": None,
+                        "test_mean_information_coefficient_delta": None,
+                        "test_degradation_visible": False,
+                    },
+                    "keep": False,
+                    "recommendation": "reject",
+                }
+            )
+            continue
         deltas = comparison_deltas(candidate_result, prior_result)
+        recommendation = candidate_recommendation(
+            deltas,
+            min_validation_delta=min_validation_delta,
+            allowed_test_degradation=allowed_test_degradation,
+        )
         keep = should_keep_candidate(
             deltas,
             min_validation_delta=min_validation_delta,
@@ -225,6 +296,7 @@ def run_cumulative_bucket_ablations(
                 "comparison_split_ranges": comparison_ranges,
                 "deltas_vs_prior_accepted": deltas,
                 "keep": keep,
+                "recommendation": recommendation,
             }
         )
 

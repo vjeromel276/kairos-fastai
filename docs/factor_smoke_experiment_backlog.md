@@ -272,7 +272,7 @@ Validation result:
 
 ### FSM-007: Run Cumulative Bucket Ablations
 
-Status: Draft
+Status: Done
 
 Scope:
 - Run cumulative bucket ablations in the reviewed bucket order.
@@ -290,6 +290,23 @@ Test plan:
 
 Suggested commit:
 - `record cumulative smoke ablations`
+
+Evidence:
+- Added `docs/factor_smoke_cumulative_ablations.md`.
+- Ran cumulative ridge ablations on `factor_panel_large_cap_smoke_v1` in the
+  reviewed bucket order.
+- Recorded `keep`, `watch`, or `reject` recommendations for every bucket.
+- Initial accepted smoke stack is `price_behavior + regime_context`.
+- Recorded rejected skipped steps for volume/liquidity, fundamental quality,
+  and valuation where complete training rows were unavailable.
+- Hardened the cumulative ablation harness so sparse candidate stacks are
+  recorded as rejected skipped steps instead of aborting the full run.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_bucket_ablation_harness.py` passed.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSM-008: Add Or Generate Scored Prediction Table
 
