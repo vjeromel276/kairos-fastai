@@ -391,7 +391,7 @@ Evidence:
 
 ### MFF-011: Add Volatility And Risk Feature Bucket
 
-Status: Draft
+Status: Done
 
 Scope:
 - Build volatility/risk features:
@@ -413,6 +413,14 @@ Test plan:
 
 Suggested commit:
 - `add volatility risk features`
+
+Evidence:
+- Added `scripts/experiments/volatility_risk_features.py`.
+- Added `tests/test_volatility_risk_features.py`.
+- Volatility/risk features include realized volatility, downside volatility,
+  recent max drawdown, SPY rolling beta, and SPY idiosyncratic volatility using
+  trailing exact-date market data with null fallback when market data is
+  unavailable.
 
 ### MFF-012: Add Fundamental Quality Feature Bucket
 
