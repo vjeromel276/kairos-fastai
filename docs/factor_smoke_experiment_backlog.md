@@ -100,7 +100,7 @@ Evidence:
 
 ### FSM-002: Verify Source Freshness And Required Tables
 
-Status: Draft
+Status: Done
 
 Scope:
 - Confirm the local DuckDB has current-enough source data for the smoke run.
@@ -121,6 +121,14 @@ Test plan:
 
 Suggested commit:
 - `record factor smoke source readiness`
+
+Evidence:
+- Added `docs/factor_smoke_source_readiness.md`.
+- Refreshed stale local Sharadar sources before proceeding.
+- Confirmed `sep_base`, `daily`, `sf1`, `sfp`, and `trading_calendar` exist
+  locally and are current through 2026-06-18 for the smoke run.
+- Confirmed `SPY` is available from `sfp` through 2026-06-18.
+- Confirmed zero duplicate `(ticker, date)` keys in `sep_base` and `daily`.
 
 ### FSM-003: Build Large-Cap Smoke Factor Panel
 
