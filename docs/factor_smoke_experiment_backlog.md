@@ -132,7 +132,7 @@ Evidence:
 
 ### FSM-003: Build Large-Cap Smoke Factor Panel
 
-Status: Draft
+Status: Done
 
 Scope:
 - Build `factor_panel_large_cap_smoke_v1` from the fixed large-cap panel.
@@ -160,6 +160,15 @@ Test plan:
 
 Suggested commit:
 - `record large cap smoke panel build`
+
+Evidence:
+- Added `docs/factor_smoke_panel_build.md`.
+- Built `factor_panel_large_cap_smoke_v1` with 135,455 rows for 20 large-cap
+  tickers across 1997-12-31 through 2026-06-18.
+- Included price, volume, volatility, fundamental, valuation, regime, and
+  cross-sectional feature buckets.
+- Ran the factor dataset quality checker; result was valid with zero duplicate
+  `(ticker, date)` keys.
 
 ### FSM-004: Run Factor Panel Quality Gate
 
