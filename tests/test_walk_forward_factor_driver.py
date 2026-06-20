@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 
 import duckdb
@@ -43,6 +44,49 @@ def seed_walk_forward_table(conn: duckdb.DuckDBPyConnection) -> None:
                 )
             )
     conn.executemany("INSERT INTO factor_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+
+
+def seed_walk_forward_table_with_null_volume(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE factor_panel_v1 (
+            ticker VARCHAR,
+            date DATE,
+            panel_name VARCHAR,
+            px_signal DOUBLE,
+            liq_signal DOUBLE,
+            future_21d_return DOUBLE,
+            winner_21d BIGINT,
+            prior_21d_return DOUBLE
+        )
+        """
+    )
+    start = date(2026, 1, 1)
+    specs = [
+        ("AAPL", 1.0, 0.03, 0.01),
+        ("MSFT", 0.0, 0.00, 0.00),
+        ("JPM", -1.0, -0.02, -0.01),
+    ]
+    rows = []
+    for offset in range(10):
+        trading_date = start + timedelta(days=offset)
+        for ticker, signal, future_return, prior_return in specs:
+            rows.append(
+                (
+                    ticker,
+                    trading_date,
+                    "unit",
+                    signal,
+                    None,
+                    future_return,
+                    int(future_return > 0),
+                    prior_return,
+                )
+            )
+    conn.executemany(
+        "INSERT INTO factor_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
 
 
 def test_make_walk_forward_folds_are_chronological() -> None:
@@ -94,8 +138,35 @@ def test_walk_forward_evaluation_records_folds_and_aggregates_metrics(tmp_path) 
     assert report["folds"][0]["ranges"]["test_end"] == "2026-01-08"
     assert report["folds"][1]["ranges"]["train_end"] == "2026-01-06"
     aggregate = report["aggregate_metrics"]["price_behavior"]
+    assert aggregate["status_counts"] == {"computed": 2}
     assert aggregate["validation"]["fold_count"] == 2
     assert aggregate["test"]["mean_top_k_average_return"] == 0.03
+
+
+def test_walk_forward_aggregation_records_skipped_bucket_folds(tmp_path) -> None:
+    db_path = tmp_path / "walk-forward-skipped.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_walk_forward_table_with_null_volume(conn)
+        report = walk_forward.run_walk_forward_factor_evaluation(
+            conn,
+            buckets=("price", "volume"),
+            train_size=4,
+            validation_size=2,
+            test_size=2,
+            step_size=2,
+            embargo=0,
+            top_k=1,
+        )
+    finally:
+        conn.close()
+
+    price = report["aggregate_metrics"]["price_behavior"]
+    volume = report["aggregate_metrics"]["volume_liquidity"]
+    assert price["status_counts"] == {"computed": 2}
+    assert volume["status_counts"] == {"skipped": 2}
+    assert volume["test"]["non_null_top_k_average_return_fold_count"] == 0
+    assert math.isnan(volume["test"]["mean_top_k_average_return"])
 
 
 def test_walk_forward_cli_prints_report(monkeypatch, tmp_path, capsys) -> None:

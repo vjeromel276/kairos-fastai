@@ -367,7 +367,7 @@ Validation result:
 
 ### FSM-009: Run Walk-Forward Smoke Evaluation
 
-Status: Draft
+Status: Done
 
 Scope:
 - Run repeated chronological folds on the selected bucket stack or candidate
@@ -386,6 +386,25 @@ Test plan:
 
 Suggested commit:
 - `record walk forward smoke evaluation`
+
+Evidence:
+- Added `docs/factor_smoke_walk_forward_evaluation.md`.
+- Ran the walk-forward smoke command across 24 chronological folds.
+- Recorded first and last fold date ranges and confirmed train windows precede
+  validation windows, which precede test windows.
+- Aggregated validation and test ranking metrics by bucket.
+- Hardened the walk-forward aggregation so skipped bucket folds are counted and
+  represented with null aggregate metrics instead of crashing.
+- Recorded that volume/liquidity, fundamental quality, and valuation skipped in
+  every fold because complete training rows were unavailable under full-bucket
+  complete-case policy.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_walk_forward_factor_driver.py` passed.
+- `python scripts/experiments/walk_forward_factor_driver.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --buckets price volume volatility fundamental valuation regime cross_sectional --train-size 756 --validation-size 252 --test-size 252 --step-size 252 --embargo 21 --top-k 5` passed with output captured at `local_artifacts/factor_smoke_v1/walk_forward_smoke_report.json`.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSM-010: Run Neutrality Diagnostics
 

@@ -74,8 +74,25 @@ def make_walk_forward_folds(
 
 
 def metric_or_nan(summary: dict[str, Any], bucket: str, split: str, metric: str) -> float:
-    value = summary["buckets"][bucket]["metrics"][split]["ranking"][metric]
+    bucket_result = summary["buckets"].get(bucket, {})
+    if bucket_result.get("status") != "computed" or "metrics" not in bucket_result:
+        return float("nan")
+    value = bucket_result["metrics"][split]["ranking"][metric]
+    if value is None:
+        return float("nan")
     return float(value)
+
+
+def bucket_status_counts(
+    fold_results: list[dict[str, Any]],
+    bucket: str,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for fold in fold_results:
+        bucket_result = fold["summary"]["buckets"].get(bucket, {})
+        status = str(bucket_result.get("status", "unknown"))
+        counts[status] = counts.get(status, 0) + 1
+    return counts
 
 
 def aggregate_walk_forward_metrics(fold_results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -87,7 +104,9 @@ def aggregate_walk_forward_metrics(fold_results: list[dict[str, Any]]) -> dict[s
     )
     aggregate: dict[str, Any] = {}
     for bucket in buckets:
-        aggregate[bucket] = {}
+        aggregate[bucket] = {
+            "status_counts": bucket_status_counts(fold_results, bucket),
+        }
         for split in ("validation", "test"):
             aggregate[bucket][split] = {"fold_count": len(fold_results)}
             for metric in metrics:
@@ -98,6 +117,9 @@ def aggregate_walk_forward_metrics(fold_results: list[dict[str, Any]]) -> dict[s
                 numeric = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
                 aggregate[bucket][split][f"mean_{metric}"] = (
                     float(numeric.mean()) if not numeric.empty else math.nan
+                )
+                aggregate[bucket][split][f"non_null_{metric}_fold_count"] = int(
+                    len(numeric)
                 )
     return aggregate
 
