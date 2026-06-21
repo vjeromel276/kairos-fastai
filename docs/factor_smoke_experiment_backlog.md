@@ -540,3 +540,160 @@ Evidence:
 
 Validation result:
 - `git diff --check` passed.
+
+### FSM-014: Freeze Price-Regime Candidate And Promotion Criteria
+
+Status: Open
+
+Scope:
+- Freeze the next candidate before any new evidence is generated:
+  `price_behavior + regime_context`.
+- Freeze the model, target, split policy, embargo, top-K, and diagnostic
+  metrics used to decide whether the candidate is kept, watched, or rejected.
+- Define the minimum evidence required before moving from the large-cap smoke
+  panel to `universe_fastai_v1`.
+
+Acceptance criteria:
+- The frozen candidate stack is explicitly documented.
+- The decision criteria are documented before running the next diagnostics.
+- Criteria include validation/test top-K return, win rate, IC, beta-adjusted
+  return, sector-neutral return, turnover, transaction-cost impact, liquidity,
+  and sector concentration.
+- The criteria state that a larger universe is a generalization test, not a way
+  to rescue a weak large-cap result.
+
+Test plan:
+- Documentation-only check: `git diff --check`
+
+Suggested commit:
+- `freeze price regime promotion criteria`
+
+### FSM-015: Refresh Post-Fix Smoke Decision Notes
+
+Status: Open
+
+Scope:
+- Update stale smoke notes after the FSB blocker fixes.
+- Keep the decision honest: the fixed stack can remain `watch`, but the old
+  reasons must be replaced with current reasons.
+- Review at least:
+  - `docs/factor_experiment_scoreboard.md`
+  - `docs/factor_smoke_next_path.md`
+  - `docs/factor_smoke_bucket_only_results.md`
+  - `docs/factor_smoke_cumulative_ablations.md`
+  - `docs/factor_smoke_walk_forward_evaluation.md`
+
+Acceptance criteria:
+- Notes no longer say sector diagnostics are unavailable after FSB-005.
+- Notes no longer say volume and valuation are untestable after FSB-001,
+  FSB-002, and FSB-004.
+- Fundamental quality remains documented as unavailable for the long split
+  under the strict PIT policy.
+- The scoreboard remains schema-valid.
+- No local JSON, DuckDB, CSV, or model artifact is committed.
+
+Test plan:
+- `python -m pytest tests/test_factor_scoreboard_schema.py`
+- `git diff --check`
+
+Suggested commit:
+- `refresh post fix factor smoke decision notes`
+
+### FSM-016: Run Full-Stack Walk-Forward For Frozen Candidate
+
+Status: Open
+
+Scope:
+- Run repeated chronological walk-forward diagnostics for the frozen
+  `price_behavior + regime_context` stack as a combined model.
+- This is separate from bucket-only walk-forward diagnostics and should answer
+  whether the accepted stack survives across multiple market periods.
+- Add the smallest safe harness change if the current walk-forward driver only
+  supports bucket-only summaries.
+
+Acceptance criteria:
+- The walk-forward report evaluates the combined `price_behavior +
+  regime_context` stack, not just each bucket independently.
+- Fold date ranges are recorded and keep train before validation before test.
+- Aggregate validation and test metrics include top-K return, win rate, IC, and
+  baseline comparison.
+- Turnover, transaction-cost, liquidity, beta-adjusted, and sector-neutral
+  summaries are either computed by fold/split or explicitly linked to a scored
+  walk-forward output.
+- The result is recorded as `keep`, `watch`, or `reject` for the large-cap
+  smoke panel.
+
+Test plan:
+- `python -m compileall scripts`
+- Add or update focused walk-forward tests if code changes are needed.
+- Run the full-stack walk-forward command against
+  `factor_panel_large_cap_smoke_v1`.
+- `python -m pytest tests`
+- `git diff --check`
+
+Suggested commit:
+- `run price regime full stack walk forward`
+
+### FSM-017: Run Frozen Candidate On `universe_fastai_v1`
+
+Status: Open
+
+Scope:
+- Promote the same frozen `price_behavior + regime_context` setup to
+  `universe_fastai_v1` as a generalization test.
+- Do not change the candidate stack, target, model, or criteria after seeing
+  universe results.
+- Treat the larger universe as an out-of-sample breadth check, not as a way to
+  force the signal to work.
+
+Acceptance criteria:
+- Source freshness and required tables are checked before the universe run.
+- A reviewed `universe_fastai_v1` factor panel is built or refreshed.
+- The same frozen candidate is scored on validation and test windows.
+- Diagnostics include validation/test top-K return, win rate, IC,
+  beta-adjusted return, sector-neutral return, turnover, transaction-cost
+  impact, liquidity/capacity, and sector concentration.
+- Results are compared against the large-cap smoke panel without changing the
+  decision criteria.
+- Generated tables and local reports are not committed.
+
+Test plan:
+- `python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --tables SEP DAILY SF1 SFP --check-only`
+- Build or refresh the universe factor panel.
+- Run the frozen candidate score export on the universe panel.
+- Run neutrality and turnover/capacity diagnostics.
+- Run focused tests for any new code.
+- `python -m pytest tests`
+- `git diff --check`
+
+Suggested commit:
+- `run price regime universe generalization test`
+
+### FSM-018: Record Price-Regime Promotion Decision
+
+Status: Open
+
+Scope:
+- Review the frozen candidate evidence from:
+  - fixed split
+  - full-stack walk-forward
+  - `universe_fastai_v1`
+  - turnover/cost/capacity
+  - beta and sector neutrality
+- Record the final `keep`, `watch`, or `reject` decision for this candidate.
+
+Acceptance criteria:
+- The scoreboard includes updated large-cap and universe evidence.
+- The decision explains whether the signal generalized or failed to
+  generalize.
+- A `keep` decision requires validation, test, walk-forward, cost, liquidity,
+  and neutrality evidence to be acceptable under the frozen criteria.
+- A `watch` decision states the exact missing evidence or risk.
+- A `reject` decision states which criterion failed.
+
+Test plan:
+- `python -m pytest tests/test_factor_scoreboard_schema.py`
+- `git diff --check`
+
+Suggested commit:
+- `record price regime promotion decision`
