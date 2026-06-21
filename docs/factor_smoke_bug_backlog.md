@@ -140,7 +140,7 @@ Validation result:
 
 ### FSB-003: Fundamental Quality Bucket Has No Train/Validation Coverage
 
-Status: Open
+Status: Done
 
 Severity: High
 
@@ -172,6 +172,26 @@ Test plan:
 
 Suggested commit:
 - `fix fundamental quality smoke coverage`
+
+Evidence:
+- Added `docs/factor_smoke_bug_fsb_003.md`.
+- Updated the quality gate to report bucket coverage by chronological split
+  when split boundaries are provided.
+- Confirmed the original smoke split has zero complete fundamental quality rows
+  in train and validation.
+- Preserved the strict PIT policy instead of backfilling fundamentals into
+  dates where they are not available.
+- Ran a separate recent-only fundamental diagnostic where strict-PIT features
+  are available.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_factor_dataset_quality.py` passed.
+- `python scripts/experiments/check_factor_dataset_quality.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --train-end 2021-12-31 --validation-end 2023-12-29 --test-end 2026-06-12 --embargo 21` passed with output captured at `local_artifacts/factor_smoke_v1/fsb003_split_quality_report.txt`.
+- `python scripts/experiments/bucket_model_harness.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --buckets fundamental --train-end 2021-12-31 --validation-end 2023-12-29 --test-end 2026-06-12 --embargo 21 --top-k 5` passed with skipped-bucket output captured at `local_artifacts/factor_smoke_v1/fsb003_fundamental_standard_report.json`.
+- `python scripts/experiments/bucket_model_harness.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --buckets fundamental --train-start 2025-08-27 --train-end 2025-12-31 --validation-start 2026-02-02 --validation-end 2026-03-31 --test-start 2026-05-01 --test-end 2026-05-19 --embargo 21 --top-k 5` passed with computed recent-only output captured at `local_artifacts/factor_smoke_v1/fsb003_fundamental_recent_report.json`.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSB-004: Valuation Bucket Is Blocked By Sparse `val_fcf_yield`
 

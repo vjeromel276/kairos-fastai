@@ -123,6 +123,38 @@ def test_factor_quality_checker_reports_optional_turnover_status(tmp_path) -> No
     assert turnover["reason"] == "optional feature all null"
 
 
+def test_factor_quality_checker_reports_bucket_coverage_by_split(tmp_path) -> None:
+    db_path = tmp_path / "factor-quality-splits.duckdb"
+    build_factor_fixture(db_path)
+
+    conn = duckdb.connect(str(db_path))
+    try:
+        conn.execute("ALTER TABLE factor_panel_v1 ADD COLUMN qual_recent DOUBLE")
+        conn.execute(
+            """
+            UPDATE factor_panel_v1
+            SET qual_recent = 1.0
+            WHERE date >= DATE '2026-01-21'
+            """
+        )
+        report = quality.validate_factor_dataset_quality(
+            conn,
+            target_horizons=(5,),
+            train_end="2026-01-10",
+            validation_end="2026-01-20",
+            test_end="2026-01-30",
+            embargo=0,
+        )
+    finally:
+        conn.close()
+
+    fundamental = report["bucket_split_availability"]["fundamental_quality"]
+    assert fundamental["train"]["rows_with_all_values"] == 0
+    assert fundamental["validation"]["rows_with_all_values"] == 0
+    assert fundamental["test"]["rows_with_all_values"] == 20
+    assert fundamental["test"]["rows_with_all_values_and_primary_target"] == 10
+
+
 def test_factor_quality_checker_fails_on_duplicate_ticker_date(tmp_path) -> None:
     db_path = tmp_path / "factor-quality-duplicates.duckdb"
     build_factor_fixture(db_path)

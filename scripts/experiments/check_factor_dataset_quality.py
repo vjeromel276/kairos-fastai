@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 from scripts.experiments.factor_feature_policy import (  # noqa: E402
     OPTIONAL_FEATURES_BY_BUCKET,
 )
+from scripts.experiments.factor_time_splits import make_factor_time_splits  # noqa: E402
 
 
 DEFAULT_TABLE = "factor_panel_v1"
@@ -213,6 +214,44 @@ def feature_policy_availability(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
     return availability
 
 
+def bucket_split_availability(
+    splits: dict[str, pd.DataFrame],
+    primary_target_column: str,
+) -> dict[str, dict[str, Any]]:
+    availability: dict[str, dict[str, Any]] = {}
+    for bucket, prefix in BUCKET_PREFIXES.items():
+        bucket_report = {}
+        for split_name, split_df in splits.items():
+            columns = [column for column in split_df.columns if column.startswith(prefix)]
+            if not columns:
+                bucket_report[split_name] = {
+                    "row_count": len(split_df),
+                    "column_count": 0,
+                    "rows_with_any_value": 0,
+                    "rows_with_all_values": 0,
+                    "rows_with_all_values_and_primary_target": 0,
+                }
+                continue
+
+            bucket_df = split_df[columns]
+            all_features = bucket_df.notna().all(axis=1)
+            if primary_target_column in split_df.columns:
+                primary_target_available = split_df[primary_target_column].notna()
+            else:
+                primary_target_available = pd.Series(False, index=split_df.index)
+            bucket_report[split_name] = {
+                "row_count": len(split_df),
+                "column_count": len(columns),
+                "rows_with_any_value": int(bucket_df.notna().any(axis=1).sum()),
+                "rows_with_all_values": int(all_features.sum()),
+                "rows_with_all_values_and_primary_target": int(
+                    (all_features & primary_target_available).sum()
+                ),
+            }
+        availability[bucket] = bucket_report
+    return availability
+
+
 def target_availability_counts(
     df: pd.DataFrame,
     target_horizons: tuple[int, ...],
@@ -254,11 +293,24 @@ def validate_factor_dataset_quality(
     conn: duckdb.DuckDBPyConnection,
     table_name: str = DEFAULT_TABLE,
     target_horizons: tuple[int, ...] = DEFAULT_TARGET_HORIZONS,
+    train_start: str | None = None,
+    train_end: str | None = None,
+    validation_start: str | None = None,
+    validation_end: str | None = None,
+    test_start: str | None = None,
+    test_end: str | None = None,
+    embargo: int | None = None,
+    embargo_unit: str = "trading",
 ) -> dict[str, Any]:
     if not target_horizons:
         raise ValueError("at least one target horizon is required")
     if any(horizon < 1 for horizon in target_horizons):
         raise ValueError("target horizons must be >= 1")
+    split_args = (train_start, train_end, validation_start, validation_end, test_start, test_end)
+    if any(value is not None for value in split_args) and not (
+        train_end and validation_end and test_end
+    ):
+        raise ValueError("train_end, validation_end, and test_end are required for split coverage")
 
     df = load_dataset(conn, table_name=table_name)
     missing_columns = sorted(required_columns(target_horizons) - set(df.columns))
@@ -276,6 +328,7 @@ def validate_factor_dataset_quality(
         "feature_null_counts": {},
         "bucket_availability": {},
         "feature_policy_availability": {},
+        "bucket_split_availability": {},
         "target_availability": {},
         "unclassified_columns": [],
         "valid": False,
@@ -290,6 +343,23 @@ def validate_factor_dataset_quality(
     report["feature_null_counts"] = feature_null_counts(df[feature_columns])
     report["bucket_availability"] = bucket_availability(df)
     report["feature_policy_availability"] = feature_policy_availability(df)
+    if train_end and validation_end and test_end:
+        splits = make_factor_time_splits(
+            df,
+            train_start=train_start,
+            train_end=train_end,
+            validation_start=validation_start,
+            validation_end=validation_end,
+            test_start=test_start,
+            test_end=test_end,
+            embargo=embargo,
+            embargo_unit=embargo_unit,
+            prediction_horizon_days=target_horizons[0],
+        )
+        report["bucket_split_availability"] = bucket_split_availability(
+            splits,
+            primary_target_column=f"future_{target_horizons[0]}d_return",
+        )
     report["target_availability"] = target_availability_counts(
         df,
         target_horizons=target_horizons,
@@ -349,6 +419,20 @@ def print_report(report: dict[str, Any]) -> None:
                     f"reason={status['reason']}"
                 )
 
+    if report["bucket_split_availability"]:
+        print("Bucket split availability:")
+        for bucket, splits in report["bucket_split_availability"].items():
+            print(f"  {bucket}:")
+            for split_name, availability in splits.items():
+                print(
+                    f"    {split_name}: rows={availability['row_count']:,}, "
+                    f"columns={availability['column_count']}, "
+                    f"rows_any={availability['rows_with_any_value']:,}, "
+                    f"rows_all={availability['rows_with_all_values']:,}, "
+                    "rows_all_with_primary_target="
+                    f"{availability['rows_with_all_values_and_primary_target']:,}"
+                )
+
     if report["target_availability"]:
         print("Target availability:")
         for horizon, counts in report["target_availability"].items():
@@ -379,6 +463,14 @@ def main() -> int:
         default=list(DEFAULT_TARGET_HORIZONS),
         help="Target horizons in trading rows (default: 21 5)",
     )
+    parser.add_argument("--train-start", default=None)
+    parser.add_argument("--train-end", default=None)
+    parser.add_argument("--validation-start", default=None)
+    parser.add_argument("--validation-end", default=None)
+    parser.add_argument("--test-start", default=None)
+    parser.add_argument("--test-end", default=None)
+    parser.add_argument("--embargo", type=int, default=None)
+    parser.add_argument("--embargo-unit", choices=("calendar", "trading"), default="trading")
     args = parser.parse_args()
 
     conn = duckdb.connect(args.db, read_only=True)
@@ -387,6 +479,14 @@ def main() -> int:
             conn,
             table_name=args.table,
             target_horizons=tuple(args.target_horizons),
+            train_start=args.train_start,
+            train_end=args.train_end,
+            validation_start=args.validation_start,
+            validation_end=args.validation_end,
+            test_start=args.test_start,
+            test_end=args.test_end,
+            embargo=args.embargo,
+            embargo_unit=args.embargo_unit,
         )
     finally:
         conn.close()
