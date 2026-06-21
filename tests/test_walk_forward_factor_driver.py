@@ -136,6 +136,56 @@ def seed_walk_forward_table_with_sparse_optional_turnover(
     )
 
 
+def seed_walk_forward_stack_table(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE factor_panel_v1 (
+            ticker VARCHAR,
+            date DATE,
+            panel_name VARCHAR,
+            px_signal DOUBLE,
+            regime_signal DOUBLE,
+            sector VARCHAR,
+            risk_beta_spy_21d DOUBLE,
+            liq_adv_20d DOUBLE,
+            future_21d_return DOUBLE,
+            winner_21d BIGINT,
+            prior_21d_return DOUBLE
+        )
+        """
+    )
+    start = date(2026, 1, 1)
+    specs = [
+        ("AAPL", 1.0, 0.5, "Technology", 1.2, 1000.0),
+        ("MSFT", 0.3, 0.2, "Technology", 1.1, 2000.0),
+        ("JPM", -0.8, -0.1, "Financials", 0.8, 3000.0),
+    ]
+    rows = []
+    for offset in range(10):
+        trading_date = start + timedelta(days=offset)
+        for ticker, px_signal, regime_signal, sector, beta, liquidity in specs:
+            future_return = px_signal * 0.02 + regime_signal * 0.01
+            rows.append(
+                (
+                    ticker,
+                    trading_date,
+                    "unit",
+                    px_signal,
+                    regime_signal,
+                    sector,
+                    beta,
+                    liquidity,
+                    future_return,
+                    int(future_return > 0),
+                    px_signal * 0.005,
+                )
+            )
+    conn.executemany(
+        "INSERT INTO factor_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+
+
 def test_make_walk_forward_folds_are_chronological() -> None:
     dates = [date(2026, 1, 1) + timedelta(days=offset) for offset in range(10)]
 
@@ -244,6 +294,47 @@ def test_walk_forward_computes_bucket_when_only_optional_feature_is_sparse(
     assert first_fold_volume["feature_policy"]["skipped_optional_columns"][0][
         "column"
     ] == "liq_turnover"
+
+
+def test_walk_forward_stack_evaluation_reports_combined_stack_and_diagnostics(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "walk-forward-stack.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_walk_forward_stack_table(conn)
+        report = walk_forward.run_walk_forward_factor_evaluation(
+            conn,
+            buckets=("price", "regime"),
+            evaluation_mode="stack",
+            train_size=4,
+            validation_size=2,
+            test_size=2,
+            step_size=2,
+            embargo=0,
+            top_k=1,
+            cost_bps=10.0,
+        )
+    finally:
+        conn.close()
+
+    assert report["evaluation_mode"] == "stack"
+    assert report["bucket_order"] == ["price_behavior", "regime_context"]
+    assert report["fold_count"] == 2
+    aggregate = report["aggregate_metrics"]
+    assert aggregate["status_counts"] == {"computed": 2}
+    assert aggregate["test"]["non_null_top_k_average_return_fold_count"] == 2
+    assert aggregate["test"]["mean_top_k_average_return"] > 0
+
+    first_stack = report["folds"][0]["summary"]["stack"]
+    assert first_stack["status"] == "computed"
+    assert first_stack["feature_columns"] == ["px_signal", "regime_signal"]
+    diagnostics = report["folds"][0]["summary"]["diagnostics"]
+    assert diagnostics["neutrality"]["split_summary"]["status"] == "computed"
+    assert diagnostics["turnover_capacity"]["split_summary"]["status"] == "computed"
+    assert report["aggregate_diagnostics"]["turnover_capacity"]["test"][
+        "non_null_cost_adjusted_top_k_average_return_fold_count"
+    ] == 2
 
 
 def test_walk_forward_cli_prints_report(monkeypatch, tmp_path, capsys) -> None:

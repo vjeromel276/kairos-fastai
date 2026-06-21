@@ -638,7 +638,7 @@ Validation result:
 
 ### FSM-016: Run Full-Stack Walk-Forward For Frozen Candidate
 
-Status: Open
+Status: Done
 
 Scope:
 - Run repeated chronological walk-forward diagnostics for the frozen
@@ -670,6 +670,28 @@ Test plan:
 
 Suggested commit:
 - `run price regime full stack walk forward`
+
+Evidence:
+- Added stack evaluation mode to `scripts/experiments/walk_forward_factor_driver.py`.
+- Added focused stack-mode coverage in `tests/test_walk_forward_factor_driver.py`.
+- Added `docs/factor_smoke_full_stack_walk_forward.md`.
+- Ran the frozen `price_behavior + regime_context` stack as one combined model
+  across 24 walk-forward folds.
+- Confirmed all 24 folds computed.
+- Recorded aggregate validation/test top-K return, win rate, IC, and
+  prior-return baseline deltas.
+- Recorded fold-level neutrality and turnover/capacity diagnostics, with
+  aggregate beta-adjusted, sector-neutral, turnover, cost-adjusted, and
+  liquidity summaries.
+- The large-cap full-stack walk-forward result is `watch` and continue to the
+  universe generalization test, not final `keep`.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_walk_forward_factor_driver.py` passed.
+- `python scripts/experiments/walk_forward_factor_driver.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --buckets price regime --evaluation-mode stack --train-size 756 --validation-size 252 --test-size 252 --step-size 252 --embargo 21 --top-k 5 --cost-bps 10` passed with output captured at `local_artifacts/factor_smoke_v1/fsm016_price_regime_full_stack_walk_forward_report.json`.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSM-017: Run Frozen Candidate On `universe_fastai_v1`
 
