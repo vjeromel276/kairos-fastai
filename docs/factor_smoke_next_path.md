@@ -4,14 +4,14 @@ Decision date: 2026-06-20
 
 ## Decision
 
-Choose this path:
+Completed path:
 
 ```text
 freeze the price-regime candidate, run full-stack walk-forward, then test universe generalization
 ```
 
-Do not move to tree-based model work yet. Do not promote the model from the
-large-cap smoke panel alone.
+Do not move to tree-based model work from this candidate. Do not promote the
+model from the large-cap smoke panel alone.
 
 ## Current Evidence
 
@@ -31,6 +31,17 @@ Positive evidence:
 - Average turnover is 0.1345, and cost-adjusted top-5 average return remains
   close to gross return at 0.0253.
 - Selected-name liquidity is strong for the large-cap smoke panel.
+- Full-stack large-cap walk-forward passed, with aggregate validation top-5
+  return 0.0210 and test top-5 return 0.0227.
+
+Negative universe evidence:
+
+- The frozen stack was tested on `universe_fastai_v1`.
+- Universe validation top-5 return was -0.0219, and universe test top-5 return
+  was -0.0136.
+- Universe cost-adjusted returns remained negative in validation and test.
+- Universe IC was positive, and the model beat a weak prior-return baseline,
+  but the top-5 selection rule did not generalize.
 
 Post-fix bucket evidence:
 
@@ -42,15 +53,10 @@ Post-fix bucket evidence:
 - `fundamental_quality` remains unavailable in the original long train and
   validation windows under the strict PIT policy.
 
-Remaining gaps:
+Remaining gap:
 
-- The evidence is still from a fixed 20-ticker large-cap smoke panel, not the
-  broader production universe.
-- The existing walk-forward report is bucket-only. The frozen
-  `price_behavior + regime_context` stack still needs combined full-stack
-  walk-forward evidence.
-- `universe_fastai_v1` has not yet been used as a generalization test for the
-  frozen candidate.
+- Record the final `keep`, `watch`, or `reject` decision for the frozen
+  candidate now that universe evidence is available.
 
 ## Next Work
 
@@ -60,15 +66,9 @@ Continue with the open tasks in:
 docs/factor_smoke_experiment_backlog.md
 ```
 
-Required order:
+Required next item:
 
-1. `FSM-014`: freeze the `price_behavior + regime_context` candidate and
-   promotion criteria.
-2. `FSM-015`: refresh stale post-fix smoke notes.
-3. `FSM-016`: run full-stack walk-forward for the frozen candidate.
-4. `FSM-017`: run the same frozen candidate on `universe_fastai_v1` as a
-   generalization test.
-5. `FSM-018`: record the final keep/watch/reject decision.
+1. `FSM-018`: record the final keep/watch/reject decision.
 
 The larger universe is a breadth/generalization test. It should not be used to
 change the candidate after seeing results or to rescue weak large-cap evidence.

@@ -24,8 +24,9 @@ Accepted smoke stack:
 price_behavior + regime_context
 ```
 
-This remains a `watch` candidate, not a promoted model. It needs full-stack
-walk-forward evidence and `universe_fastai_v1` generalization evidence.
+This large-cap smoke step selected the candidate, but later promotion evidence
+is mixed: full-stack large-cap walk-forward passed, while
+`universe_fastai_v1` generalization failed.
 
 ## Command Run
 

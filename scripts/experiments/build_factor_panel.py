@@ -185,6 +185,7 @@ def load_price_panel(
     conn: duckdb.DuckDBPyConnection,
     tickers: list[str],
     source_table: str = DEFAULT_SOURCE_TABLE,
+    start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
     selected_tickers = normalize_tickers(tickers)
@@ -195,6 +196,9 @@ def load_price_panel(
         "closeadj IS NOT NULL",
     ]
     params: list[object] = list(selected_tickers)
+    if start_date:
+        filters.append("date >= ?")
+        params.append(start_date)
     if end_date:
         filters.append("date <= ?")
         params.append(end_date)
@@ -215,12 +219,16 @@ def load_price_panel(
 def load_spy_prices(
     conn: duckdb.DuckDBPyConnection,
     spy_table: str = DEFAULT_SPY_TABLE,
+    start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
     if not table_exists(conn, spy_table):
         return pd.DataFrame(columns=["date", "closeadj"])
     filters = ["ticker = 'SPY'", "date IS NOT NULL", "closeadj IS NOT NULL"]
     params: list[object] = []
+    if start_date:
+        filters.append("date >= ?")
+        params.append(start_date)
     if end_date:
         filters.append("date <= ?")
         params.append(end_date)
@@ -296,6 +304,62 @@ def add_ticker_metadata(panel: pd.DataFrame, metadata: pd.DataFrame) -> pd.DataF
         return panel
     clean_metadata = metadata[["ticker", *metadata_columns]].drop_duplicates("ticker")
     return panel.merge(clean_metadata, on="ticker", how="left")
+
+
+def load_universe_membership(
+    conn: duckdb.DuckDBPyConnection,
+    tickers: list[str],
+    universe_table: str = DEFAULT_UNIVERSE_TABLE,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    columns = table_columns(conn, universe_table)
+    if not columns:
+        raise ValueError(f"universe table not found: {universe_table}")
+    required = {"ticker", "date"}
+    missing = sorted(required - set(columns))
+    if missing:
+        raise ValueError(
+            f"universe table lacks required columns: {', '.join(missing)}"
+        )
+
+    selected_tickers = normalize_tickers(tickers)
+    if not selected_tickers:
+        return pd.DataFrame(columns=["ticker", "date"])
+
+    placeholders = ", ".join(["?"] * len(selected_tickers))
+    filters = [f"ticker IN ({placeholders})", "date IS NOT NULL"]
+    params: list[object] = list(selected_tickers)
+    if start_date:
+        filters.append("date >= ?")
+        params.append(start_date)
+    if end_date:
+        filters.append("date <= ?")
+        params.append(end_date)
+
+    query = f"""
+        SELECT DISTINCT ticker, CAST(date AS DATE) AS date
+        FROM {quote_identifier(universe_table)}
+        WHERE {' AND '.join(filters)}
+    """
+    return conn.execute(query, params).fetchdf()
+
+
+def filter_to_universe_membership(
+    panel: pd.DataFrame,
+    membership: pd.DataFrame,
+) -> pd.DataFrame:
+    if membership.empty:
+        return panel.iloc[0:0].copy()
+
+    result = panel.copy()
+    result["date"] = pd.to_datetime(result["date"], errors="coerce")
+    clean_membership = membership[["ticker", "date"]].drop_duplicates().copy()
+    clean_membership["date"] = pd.to_datetime(
+        clean_membership["date"],
+        errors="coerce",
+    )
+    return result.merge(clean_membership, on=["ticker", "date"], how="inner")
 
 
 def load_optional_table(
@@ -402,6 +466,7 @@ def apply_feature_buckets(
     spy_table: str = DEFAULT_SPY_TABLE,
     daily_table: str = DEFAULT_DAILY_TABLE,
     sf1_table: str = DEFAULT_SF1_TABLE,
+    source_start_date: str | None = None,
 ) -> pd.DataFrame:
     result = panel.copy()
     spy_prices: pd.DataFrame | None = None
@@ -415,6 +480,7 @@ def apply_feature_buckets(
             spy_prices = spy_prices if spy_prices is not None else load_spy_prices(
                 conn,
                 spy_table=spy_table,
+                start_date=source_start_date,
                 end_date=end_date,
             )
             result = add_volatility_risk_features_for_panel(
@@ -485,6 +551,7 @@ def apply_feature_buckets(
             spy_prices = spy_prices if spy_prices is not None else load_spy_prices(
                 conn,
                 spy_table=spy_table,
+                start_date=source_start_date,
                 end_date=end_date,
             )
             breadth_columns = ("px_return_21d",) if "px_return_21d" in result.columns else ()
@@ -497,6 +564,7 @@ def apply_feature_buckets(
             spy_prices = spy_prices if spy_prices is not None else load_spy_prices(
                 conn,
                 spy_table=spy_table,
+                start_date=source_start_date,
                 end_date=end_date,
             )
             result = add_cross_sectional_bucket(result, spy_prices)
@@ -513,6 +581,8 @@ def build_factor_panel(
     daily_table: str = DEFAULT_DAILY_TABLE,
     sf1_table: str = DEFAULT_SF1_TABLE,
     tickers_table: str = DEFAULT_TICKERS_TABLE,
+    universe_table: str = DEFAULT_UNIVERSE_TABLE,
+    source_start_date: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     horizons: tuple[int, ...] = (21, 5),
@@ -523,6 +593,7 @@ def build_factor_panel(
         conn,
         tickers=tickers,
         source_table=source_table,
+        start_date=source_start_date,
         end_date=end_date,
     )
     panel = build_target_base(
@@ -543,8 +614,20 @@ def build_factor_panel(
         spy_table=spy_table,
         daily_table=daily_table,
         sf1_table=sf1_table,
+        source_start_date=source_start_date,
     )
     panel = filter_output_dates(panel, start_date=start_date, end_date=end_date)
+    if panel_name == "universe_fastai_v1":
+        panel = filter_to_universe_membership(
+            panel,
+            load_universe_membership(
+                conn,
+                tickers=tickers,
+                universe_table=universe_table,
+                start_date=start_date,
+                end_date=end_date,
+            ),
+        )
     if panel[["ticker", "date"]].duplicated().any():
         raise ValueError("factor panel contains duplicate ticker/date rows")
     return panel
@@ -590,6 +673,14 @@ def main() -> int:
         help=f"Buckets to build, comma or space separated (default: {' '.join(DEFAULT_BUCKETS)})",
     )
     parser.add_argument("--start-date", default=None, help="Optional output start date")
+    parser.add_argument(
+        "--source-start-date",
+        default=None,
+        help=(
+            "Optional earliest source date to load before output filtering; use "
+            "for warmup-bounded universe builds"
+        ),
+    )
     parser.add_argument("--end-date", default=None, help="Optional source/output end date")
     parser.add_argument(
         "--source-table",
@@ -657,6 +748,8 @@ def main() -> int:
             daily_table=args.daily_table,
             sf1_table=args.sf1_table,
             tickers_table=args.tickers_table,
+            universe_table=args.universe_table,
+            source_start_date=args.source_start_date,
             start_date=args.start_date,
             end_date=args.end_date,
             horizons=horizons,

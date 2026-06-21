@@ -11,8 +11,9 @@ walk-forward folds as a combined model. Aggregate validation and test metrics
 are positive, beat the prior-return baseline, and remain positive after beta,
 sector-neutral, turnover, and transaction-cost diagnostics.
 
-This is still large-cap smoke evidence, not final promotion evidence. The next
-required step is the `universe_fastai_v1` generalization test.
+This is still large-cap smoke evidence, not final promotion evidence. The later
+`universe_fastai_v1` generalization test failed and is recorded in
+`docs/factor_universe_price_regime_generalization.md`.
 
 ## Command Run
 
@@ -74,5 +75,5 @@ Turnover, cost, and liquidity:
 - Sector-neutral results remain positive, so the signal is not erased by
   neutralizing sector context.
 - Liquidity remains strong for the large-cap smoke panel.
-- The appropriate decision is `watch` and continue to `universe_fastai_v1`,
-  not final `keep`, because breadth/generalization evidence is still missing.
+- The appropriate decision from this step was `watch`; later
+  breadth/generalization evidence failed on `universe_fastai_v1`.

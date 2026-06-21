@@ -695,7 +695,7 @@ Validation result:
 
 ### FSM-017: Run Frozen Candidate On `universe_fastai_v1`
 
-Status: Open
+Status: Done
 
 Scope:
 - Promote the same frozen `price_behavior + regime_context` setup to
@@ -727,6 +727,40 @@ Test plan:
 
 Suggested commit:
 - `run price regime universe generalization test`
+
+Evidence:
+- Checked source freshness before scoring. `SEP`, `DAILY`, and `SFP` were up
+  to date at `2026-06-18`; `SF1` reported `needs_update` while local and API
+  max dates both printed as `2026-06-18`, documented as a non-blocking warning
+  because the frozen stack does not use SF1 features.
+- Rebuilt/reviewed `universe_fastai_v1`: 17,895,906 rows, 12,608 tickers,
+  1998-03-27..2026-06-18, with 1,607 to 3,542 names per day.
+- Added a date-level universe membership guard to the pandas panel builder and
+  a DuckDB-window builder for the frozen universe price/regime panel after the
+  full-history pandas build was killed with exit `137`.
+- Built `factor_panel_universe_price_regime_v1` with 5,953,357 rows, 6,424
+  tickers, 2018-01-02..2026-06-18, and zero duplicate ticker/date keys.
+- Scored the frozen `price_behavior + regime_context` stack into
+  `factor_universe_price_regime_scores_v1` using the same target, model,
+  embargo, and top-K policy.
+- Recorded validation/test ranking, baseline comparison, beta-adjusted,
+  sector-neutral, turnover, cost, liquidity, and sector concentration metrics
+  in `docs/factor_universe_price_regime_generalization.md`.
+- Universe result failed promotion criteria: validation top-5 return was
+  -0.0219 and test top-5 return was -0.0136; cost-adjusted returns were also
+  negative despite positive IC and positive deltas versus the weak prior-return
+  baseline.
+- Updated `docs/factor_experiment_scoreboard.md` with the universe evidence.
+
+Validation result:
+- `python scripts/pipeline/sharadar_data_sync.py --db data/kairos-fastai.duckdb --tables SEP DAILY SF1 SFP --check-only` passed with the documented SF1 warning.
+- `python scripts/experiments/build_universe_price_regime_panel.py --db data/kairos-fastai.duckdb --source-start-date 2016-12-15 --start-date 2018-01-02 --output-table factor_panel_universe_price_regime_v1` passed.
+- `python scripts/experiments/export_factor_scores.py --db data/kairos-fastai.duckdb --table factor_panel_universe_price_regime_v1 --output-table factor_universe_price_regime_scores_v1 --bucket-stack price regime --train-start 2018-01-02 --train-end 2021-12-31 --validation-end 2023-12-29 --test-end 2026-06-12 --score-splits validation test --embargo 21` passed.
+- `python scripts/experiments/factor_neutrality_diagnostics.py --db data/kairos-fastai.duckdb --table factor_universe_price_regime_scores_v1 --score-column prediction_score --target-column future_21d_return --beta-column risk_beta_spy_21d --top-k 5` passed.
+- `python scripts/experiments/turnover_capacity_metrics.py --db data/kairos-fastai.duckdb --table factor_universe_price_regime_scores_v1 --score-column prediction_score --target-column future_21d_return --liquidity-column liq_adv_20d --top-k 5 --cost-bps 10` passed.
+- `python -m compileall scripts` passed.
+- `python -m pytest tests` passed with 178 tests.
+- `git diff --check` passed.
 
 ### FSM-018: Record Price-Regime Promotion Decision
 

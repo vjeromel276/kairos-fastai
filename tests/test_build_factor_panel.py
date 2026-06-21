@@ -55,6 +55,27 @@ def test_build_factor_panel_with_one_bucket_and_date_filters(tmp_path) -> None:
     assert first_row["px_return_1d"] == pytest.approx(104.0 / 103.0 - 1.0)
 
 
+def test_build_factor_panel_uses_source_start_as_hidden_warmup(tmp_path) -> None:
+    db_path = tmp_path / "factor-panel-source-start.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_panel_sources(conn)
+        panel = panel_builder.build_factor_panel(
+            conn,
+            tickers=["AAPL"],
+            buckets=("price",),
+            source_start_date="2026-01-05",
+            start_date="2026-01-10",
+            end_date="2026-01-20",
+        )
+    finally:
+        conn.close()
+
+    assert panel["date"].min() == pd.Timestamp("2026-01-10")
+    first_row = panel.iloc[0]
+    assert first_row["px_return_5d"] == pytest.approx(109.0 / 104.0 - 1.0)
+
+
 def test_build_factor_panel_with_multiple_buckets(tmp_path) -> None:
     db_path = tmp_path / "factor-panel-multi.duckdb"
     conn = duckdb.connect(str(db_path))
@@ -215,7 +236,9 @@ def test_universe_panel_must_be_explicit_and_reads_universe_table(tmp_path) -> N
 
     assert default_tickers == ["AAPL"]
     assert universe_tickers == ["MSFT"]
+    assert len(panel) == 1
     assert panel["ticker"].unique().tolist() == ["MSFT"]
+    assert panel["date"].tolist() == [pd.Timestamp("2026-01-10")]
     assert panel["panel_name"].unique().tolist() == ["universe_fastai_v1"]
 
 
