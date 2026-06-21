@@ -47,12 +47,12 @@ Available diagnostic columns:
 
 ```text
 ticker, date, panel_name, future_21d_return, winner_21d,
-prior_21d_return, risk_beta_spy_21d, liq_adv_20d, split,
-prediction_score
+prior_21d_return, sector, industry, risk_beta_spy_21d,
+liq_adv_20d, split, prediction_score
 ```
 
-`sector` is not available in the current smoke panel, so sector diagnostics
-skip explicitly.
+`sector` and `industry` come from static ticker metadata. They are available
+for diagnostics but should not be treated as point-in-time sector history.
 
 ## Neutrality Diagnostics
 
@@ -75,7 +75,7 @@ Result:
 Sector result:
 
 ```text
-skipped: sector column missing
+computed: sector-neutral, sector-breakdown, and top-K concentration metrics
 ```
 
 Additional beta-adjusted command:
@@ -118,7 +118,7 @@ Result:
 ## Notes
 
 - The export is validation/test out-of-sample relative to the training window.
-- The diagnostics currently evaluate the combined scored table. Later
-  promotion work should separate validation, test, and walk-forward summaries.
+- The diagnostics now report both the combined scored table and
+  validation/test split summaries.
 - The beta-adjusted result remains positive but weaker than the unadjusted
   full-panel ranking, so beta exposure should stay under review.

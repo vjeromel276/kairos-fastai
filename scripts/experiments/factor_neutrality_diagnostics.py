@@ -28,6 +28,7 @@ from scripts.experiments.train_rsi_one_ticker_baselines import (  # noqa: E402
 DEFAULT_SCORE_COLUMN = "prediction_score"
 DEFAULT_TARGET_COLUMN = "future_21d_return"
 DEFAULT_SECTOR_COLUMN = "sector"
+DEFAULT_SPLIT_COLUMN = "split"
 DEFAULT_TOP_K = 10
 
 
@@ -169,6 +170,49 @@ def beta_adjust_scores_by_date(
     return adjusted
 
 
+def split_neutrality_summary(
+    df: pd.DataFrame,
+    split_column: str,
+    score_column: str,
+    target_column: str,
+    date_column: str,
+    sector_column: str,
+    beta_column: str | None,
+    top_k: int,
+) -> dict[str, Any]:
+    if split_column not in df.columns:
+        return {
+            "status": "skipped",
+            "reason": f"split column missing: {split_column}",
+        }
+
+    frame = df.dropna(subset=[split_column])
+    if frame.empty:
+        return {
+            "status": "empty",
+            "split_column": split_column,
+            "splits": {},
+        }
+
+    summaries = {}
+    for split_name, split_df in frame.groupby(split_column, sort=True):
+        summaries[str(split_name)] = run_factor_neutrality_diagnostics(
+            split_df,
+            score_column=score_column,
+            target_column=target_column,
+            date_column=date_column,
+            sector_column=sector_column,
+            beta_column=beta_column,
+            top_k=top_k,
+            split_column=None,
+        )
+    return {
+        "status": "computed",
+        "split_column": split_column,
+        "splits": summaries,
+    }
+
+
 def run_factor_neutrality_diagnostics(
     df: pd.DataFrame,
     score_column: str = DEFAULT_SCORE_COLUMN,
@@ -177,6 +221,7 @@ def run_factor_neutrality_diagnostics(
     sector_column: str = DEFAULT_SECTOR_COLUMN,
     beta_column: str | None = None,
     top_k: int = DEFAULT_TOP_K,
+    split_column: str | None = DEFAULT_SPLIT_COLUMN,
 ) -> dict[str, Any]:
     if top_k < 1:
         raise ValueError("top_k must be >= 1")
@@ -244,7 +289,7 @@ def run_factor_neutrality_diagnostics(
             ),
         }
 
-    return {
+    report = {
         "row_count": len(df),
         "score_column": score_column,
         "target_column": target_column,
@@ -253,6 +298,18 @@ def run_factor_neutrality_diagnostics(
         "sector": sector,
         "beta_adjusted": beta_adjusted,
     }
+    if split_column is not None:
+        report["split_summary"] = split_neutrality_summary(
+            df,
+            split_column=split_column,
+            score_column=score_column,
+            target_column=target_column,
+            date_column=date_column,
+            sector_column=sector_column,
+            beta_column=beta_column,
+            top_k=top_k,
+        )
+    return report
 
 
 def validate_factor_neutrality(
@@ -264,6 +321,7 @@ def validate_factor_neutrality(
     sector_column: str = DEFAULT_SECTOR_COLUMN,
     beta_column: str | None = None,
     top_k: int = DEFAULT_TOP_K,
+    split_column: str | None = DEFAULT_SPLIT_COLUMN,
 ) -> dict[str, Any]:
     df = load_scored_panel(conn, table_name=table_name)
     report = run_factor_neutrality_diagnostics(
@@ -274,6 +332,7 @@ def validate_factor_neutrality(
         sector_column=sector_column,
         beta_column=beta_column,
         top_k=top_k,
+        split_column=split_column,
     )
     report["table"] = table_name
     return report
@@ -312,6 +371,11 @@ def main() -> int:
     parser.add_argument("--date-column", default="date")
     parser.add_argument("--sector-column", default=DEFAULT_SECTOR_COLUMN)
     parser.add_argument("--beta-column", default=None)
+    parser.add_argument(
+        "--split-column",
+        default=DEFAULT_SPLIT_COLUMN,
+        help="Optional split column for grouped diagnostics; use empty string to disable",
+    )
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     args = parser.parse_args()
 
@@ -326,6 +390,7 @@ def main() -> int:
             sector_column=args.sector_column,
             beta_column=args.beta_column,
             top_k=args.top_k,
+            split_column=args.split_column or None,
         )
     finally:
         conn.close()

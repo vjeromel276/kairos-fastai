@@ -6,10 +6,13 @@ Run date: 2026-06-20
 
 Status: pass.
 
+The turnover/capacity report preserves the combined validation/test summary and
+adds validation/test split summaries under `split_summary`.
+
 The full daily turnover report is stored locally and is not committed:
 
 ```text
-local_artifacts/factor_smoke_v1/turnover_capacity_smoke_report.json
+local_artifacts/factor_smoke_v1/fsb006_turnover_capacity_report.json
 ```
 
 ## Command Run
@@ -18,7 +21,7 @@ local_artifacts/factor_smoke_v1/turnover_capacity_smoke_report.json
 python scripts/experiments/turnover_capacity_metrics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --target-column future_21d_return --liquidity-column liq_adv_20d --top-k 5 --cost-bps 10
 ```
 
-## Results
+## Combined Results
 
 | metric | value |
 | --- | ---: |
@@ -27,8 +30,6 @@ python scripts/experiments/turnover_capacity_metrics.py --db data/kairos-fastai.
 | missing score dates | 0 |
 | average turnover | 0.1345 |
 | average holding overlap | 0.8655 |
-| maximum daily turnover | 0.6000 |
-| zero-turnover days | 445 |
 | gross top-K average return | 0.0254 |
 | cost-adjusted top-K average return | 0.0253 |
 | cost assumption | 10 bps |
@@ -42,18 +43,25 @@ Liquidity summary for selected top-K rows:
 | median `liq_adv_20d` | 4,431,811,093 |
 | minimum `liq_adv_20d` | 365,473,070 |
 
-Date range:
+## Split Results
 
-| row | date | turnover | holding overlap | gross return | cost-adjusted return |
-| --- | --- | ---: | ---: | ---: | ---: |
-| first | 2022-02-02 | n/a | n/a | -0.0852 | -0.0852 |
-| last | 2026-05-19 | 0.0000 | 1.0000 | -0.0092 | -0.0092 |
+| split | rows | dates | average turnover | holding overlap | gross return | cost-adjusted return |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| validation | 9,600 | 480 | 0.1253 | 0.8747 | 0.0264 | 0.0263 |
+| test | 11,439 | 572 | 0.1415 | 0.8585 | 0.0246 | 0.0245 |
+
+Split liquidity summary:
+
+| split | selected rows | average `liq_adv_20d` | median `liq_adv_20d` | minimum `liq_adv_20d` |
+| --- | ---: | ---: | ---: | ---: |
+| validation | 2,400 | 5,565,736,818 | 4,191,839,032 | 365,473,070 |
+| test | 2,860 | 9,461,329,977 | 4,516,485,658 | 738,223,002 |
 
 ## Readout
 
-- Missing score days are zero.
+- Missing score days are zero in both validation and test.
 - Average turnover is modest for a daily top-5 selection process.
+- Test turnover is slightly higher than validation turnover.
 - The 10 bps transaction-cost assumption has a small average impact because
   average turnover is low.
-- Selected-name liquidity is high enough for this large-cap smoke panel, with
-  minimum selected `liq_adv_20d` around 365 million.
+- Selected-name liquidity remains high in both splits.

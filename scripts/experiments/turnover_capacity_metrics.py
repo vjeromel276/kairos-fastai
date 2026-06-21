@@ -25,6 +25,7 @@ from scripts.experiments.check_factor_dataset_quality import DEFAULT_TABLE  # no
 DEFAULT_SCORE_COLUMN = "prediction_score"
 DEFAULT_TARGET_COLUMN = "future_21d_return"
 DEFAULT_LIQUIDITY_COLUMN = "liq_adv_20d"
+DEFAULT_SPLIT_COLUMN = "split"
 DEFAULT_TOP_K = 10
 DEFAULT_COST_BPS = 10.0
 
@@ -150,6 +151,51 @@ def average_non_null(values: list[object]) -> float:
     return float(numeric.mean()) if not numeric.empty else math.nan
 
 
+def split_turnover_capacity_summary(
+    df: pd.DataFrame,
+    split_column: str,
+    score_column: str,
+    target_column: str,
+    liquidity_column: str,
+    ticker_column: str,
+    date_column: str,
+    top_k: int,
+    cost_bps: float,
+) -> dict[str, Any]:
+    if split_column not in df.columns:
+        return {
+            "status": "skipped",
+            "reason": f"split column missing: {split_column}",
+        }
+
+    frame = df.dropna(subset=[split_column])
+    if frame.empty:
+        return {
+            "status": "empty",
+            "split_column": split_column,
+            "splits": {},
+        }
+
+    summaries = {}
+    for split_name, split_df in frame.groupby(split_column, sort=True):
+        summaries[str(split_name)] = run_turnover_capacity_metrics(
+            split_df,
+            score_column=score_column,
+            target_column=target_column,
+            liquidity_column=liquidity_column,
+            ticker_column=ticker_column,
+            date_column=date_column,
+            top_k=top_k,
+            cost_bps=cost_bps,
+            split_column=None,
+        )
+    return {
+        "status": "computed",
+        "split_column": split_column,
+        "splits": summaries,
+    }
+
+
 def run_turnover_capacity_metrics(
     df: pd.DataFrame,
     score_column: str = DEFAULT_SCORE_COLUMN,
@@ -159,6 +205,7 @@ def run_turnover_capacity_metrics(
     date_column: str = "date",
     top_k: int = DEFAULT_TOP_K,
     cost_bps: float = DEFAULT_COST_BPS,
+    split_column: str | None = DEFAULT_SPLIT_COLUMN,
 ) -> dict[str, Any]:
     require_columns(df, (date_column, ticker_column, score_column, target_column))
     selected, missing_score_days = select_top_k_by_date(
@@ -174,7 +221,7 @@ def run_turnover_capacity_metrics(
         date_column=date_column,
         cost_bps=cost_bps,
     )
-    return {
+    report = {
         "row_count": len(df),
         "top_k": top_k,
         "score_column": score_column,
@@ -197,6 +244,19 @@ def run_turnover_capacity_metrics(
             liquidity_column=liquidity_column,
         ),
     }
+    if split_column is not None:
+        report["split_summary"] = split_turnover_capacity_summary(
+            df,
+            split_column=split_column,
+            score_column=score_column,
+            target_column=target_column,
+            liquidity_column=liquidity_column,
+            ticker_column=ticker_column,
+            date_column=date_column,
+            top_k=top_k,
+            cost_bps=cost_bps,
+        )
+    return report
 
 
 def validate_turnover_capacity(
@@ -209,6 +269,7 @@ def validate_turnover_capacity(
     date_column: str = "date",
     top_k: int = DEFAULT_TOP_K,
     cost_bps: float = DEFAULT_COST_BPS,
+    split_column: str | None = DEFAULT_SPLIT_COLUMN,
 ) -> dict[str, Any]:
     df = load_scored_panel(conn, table_name=table_name)
     report = run_turnover_capacity_metrics(
@@ -220,6 +281,7 @@ def validate_turnover_capacity(
         date_column=date_column,
         top_k=top_k,
         cost_bps=cost_bps,
+        split_column=split_column,
     )
     report["table"] = table_name
     return report
@@ -258,6 +320,11 @@ def main() -> int:
     parser.add_argument("--liquidity-column", default=DEFAULT_LIQUIDITY_COLUMN)
     parser.add_argument("--ticker-column", default="ticker")
     parser.add_argument("--date-column", default="date")
+    parser.add_argument(
+        "--split-column",
+        default=DEFAULT_SPLIT_COLUMN,
+        help="Optional split column for grouped diagnostics; use empty string to disable",
+    )
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     parser.add_argument("--cost-bps", type=float, default=DEFAULT_COST_BPS)
     args = parser.parse_args()
@@ -274,6 +341,7 @@ def main() -> int:
             date_column=args.date_column,
             top_k=args.top_k,
             cost_bps=args.cost_bps,
+            split_column=args.split_column or None,
         )
     finally:
         conn.close()

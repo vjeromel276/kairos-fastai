@@ -107,6 +107,47 @@ def test_beta_adjusted_diagnostics_are_computed_when_beta_is_available() -> None
     assert report["beta_adjusted"]["ranking"]["date_count"] == 2
 
 
+def test_neutrality_diagnostics_include_split_summary_when_available() -> None:
+    import pandas as pd
+
+    df = pd.DataFrame(
+        scored_rows(),
+        columns=[
+            "ticker",
+            "date",
+            "sector",
+            "prediction_score",
+            "future_21d_return",
+            "risk_beta_spy_21d",
+        ],
+    )
+    df["split"] = df["date"].map(
+        {
+            date(2026, 1, 1): "validation",
+            date(2026, 1, 2): "test",
+        }
+    )
+
+    report = neutrality.run_factor_neutrality_diagnostics(
+        df,
+        beta_column="risk_beta_spy_21d",
+        top_k=1,
+    )
+
+    split_summary = report["split_summary"]
+    assert split_summary["status"] == "computed"
+    assert set(split_summary["splits"]) == {"validation", "test"}
+    assert report["full_panel"]["top_k_average_return"] == pytest.approx(0.045)
+    assert split_summary["splits"]["validation"]["row_count"] == 4
+    assert split_summary["splits"]["validation"]["full_panel"][
+        "top_k_average_return"
+    ] == pytest.approx(0.04)
+    assert split_summary["splits"]["test"]["row_count"] == 4
+    assert split_summary["splits"]["test"]["full_panel"][
+        "top_k_average_return"
+    ] == pytest.approx(0.05)
+
+
 def test_neutrality_cli_runs_on_temp_duckdb_fixture(monkeypatch, tmp_path, capsys) -> None:
     db_path = tmp_path / "neutrality.duckdb"
     conn = duckdb.connect(str(db_path))

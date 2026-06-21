@@ -307,7 +307,7 @@ Validation result:
 
 ### FSB-006: Validation/Test Score Summaries Are Not Split In Diagnostics Notes
 
-Status: Open
+Status: Done
 
 Severity: Medium
 
@@ -335,6 +335,25 @@ Test plan:
 
 Suggested commit:
 - `add split-aware factor score diagnostics`
+
+Evidence:
+- Added `docs/factor_smoke_bug_fsb_006.md`.
+- Updated neutrality diagnostics to include a `split_summary` section when the
+  scored table has a `split` column.
+- Updated turnover/capacity diagnostics to include a `split_summary` section
+  when the scored table has a `split` column.
+- Preserved the existing combined validation/test summary as the top-level
+  report.
+- Updated the smoke score export, neutrality, and turnover notes so validation
+  and test behavior are recorded separately.
+- Confirmed the smoke score table reports validation and test split summaries
+  for both neutrality and turnover/capacity diagnostics.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_factor_neutrality_diagnostics.py tests/test_turnover_capacity_metrics.py` passed.
+- `python scripts/experiments/factor_neutrality_diagnostics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --target-column future_21d_return --beta-column risk_beta_spy_21d --top-k 5` passed with output captured at `local_artifacts/factor_smoke_v1/fsb006_neutrality_report.json`.
+- `python scripts/experiments/turnover_capacity_metrics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --target-column future_21d_return --liquidity-column liq_adv_20d --top-k 5 --cost-bps 10` passed with output captured at `local_artifacts/factor_smoke_v1/fsb006_turnover_capacity_report.json`.
 
 ## Recommended Fix Order
 

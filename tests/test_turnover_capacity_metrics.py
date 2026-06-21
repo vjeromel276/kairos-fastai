@@ -90,6 +90,47 @@ def test_turnover_metrics_skip_missing_score_days() -> None:
     ]
 
 
+def test_turnover_metrics_include_split_summary_when_available() -> None:
+    df = scored_frame(
+        [
+            ("A", date(2026, 1, 1), 0.9, 0.01, 1000.0),
+            ("B", date(2026, 1, 1), 0.8, 0.02, 2000.0),
+            ("C", date(2026, 1, 1), 0.1, -0.01, 3000.0),
+            ("D", date(2026, 1, 1), 0.0, -0.02, 4000.0),
+            ("A", date(2026, 1, 2), 0.9, 0.03, 1000.0),
+            ("B", date(2026, 1, 2), 0.8, 0.04, 2000.0),
+            ("C", date(2026, 1, 2), 0.1, -0.01, 3000.0),
+            ("D", date(2026, 1, 2), 0.0, -0.02, 4000.0),
+            ("A", date(2026, 1, 3), 0.1, 0.01, 1000.0),
+            ("B", date(2026, 1, 3), 0.0, 0.02, 2000.0),
+            ("C", date(2026, 1, 3), 0.9, 0.03, 3000.0),
+            ("D", date(2026, 1, 3), 0.8, 0.05, 4000.0),
+            ("A", date(2026, 1, 4), 0.9, 0.01, 1000.0),
+            ("B", date(2026, 1, 4), 0.8, 0.02, 2000.0),
+            ("C", date(2026, 1, 4), 0.1, 0.03, 3000.0),
+            ("D", date(2026, 1, 4), 0.0, 0.05, 4000.0),
+        ]
+    )
+    df["split"] = df["date"].map(
+        {
+            date(2026, 1, 1): "validation",
+            date(2026, 1, 2): "validation",
+            date(2026, 1, 3): "test",
+            date(2026, 1, 4): "test",
+        }
+    )
+
+    report = turnover.run_turnover_capacity_metrics(df, top_k=2, cost_bps=10.0)
+
+    split_summary = report["split_summary"]
+    assert split_summary["status"] == "computed"
+    assert set(split_summary["splits"]) == {"validation", "test"}
+    assert split_summary["splits"]["validation"]["selected_date_count"] == 2
+    assert split_summary["splits"]["validation"]["average_turnover"] == pytest.approx(0.0)
+    assert split_summary["splits"]["test"]["selected_date_count"] == 2
+    assert split_summary["splits"]["test"]["average_turnover"] == pytest.approx(1.0)
+
+
 def test_turnover_capacity_cli_runs_on_temp_duckdb_fixture(
     monkeypatch,
     tmp_path,
