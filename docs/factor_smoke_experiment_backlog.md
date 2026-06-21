@@ -543,7 +543,7 @@ Validation result:
 
 ### FSM-014: Freeze Price-Regime Candidate And Promotion Criteria
 
-Status: Open
+Status: Done
 
 Scope:
 - Freeze the next candidate before any new evidence is generated:
@@ -567,6 +567,20 @@ Test plan:
 
 Suggested commit:
 - `freeze price regime promotion criteria`
+
+Evidence:
+- Added `docs/factor_price_regime_promotion_criteria.md`.
+- Froze the candidate stack as `price_behavior + regime_context`.
+- Froze the model as `ridge_regression`, target as `future_21d_return`,
+  baseline as `prior_21d_return`, top-K as 5, embargo as 21 trading days, and
+  transaction-cost proxy as 10 bps.
+- Documented the required diagnostics and decision rules before running the
+  next walk-forward or universe evidence.
+- Documented that `universe_fastai_v1` is a generalization test, not a way to
+  rescue a weak large-cap result.
+
+Validation result:
+- `git diff --check` passed.
 
 ### FSM-015: Refresh Post-Fix Smoke Decision Notes
 
