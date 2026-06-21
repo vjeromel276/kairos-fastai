@@ -123,6 +123,28 @@ def test_factor_quality_checker_reports_optional_turnover_status(tmp_path) -> No
     assert turnover["reason"] == "optional feature all null"
 
 
+def test_factor_quality_checker_reports_optional_cash_flow_yield_status(tmp_path) -> None:
+    db_path = tmp_path / "factor-quality-fcf-yield.duckdb"
+    build_factor_fixture(db_path)
+
+    conn = duckdb.connect(str(db_path))
+    try:
+        conn.execute("ALTER TABLE factor_panel_v1 ADD COLUMN val_earnings_yield DOUBLE")
+        conn.execute("ALTER TABLE factor_panel_v1 ADD COLUMN val_fcf_yield DOUBLE")
+        conn.execute("UPDATE factor_panel_v1 SET val_earnings_yield = 0.05")
+        report = quality.validate_factor_dataset_quality(conn)
+    finally:
+        conn.close()
+
+    fcf_yield = report["feature_policy_availability"]["valuation"][
+        "optional_feature_status"
+    ]["val_fcf_yield"]
+    assert fcf_yield["role"] == "optional"
+    assert fcf_yield["status"] == "skipped"
+    assert fcf_yield["non_null_rows"] == 0
+    assert fcf_yield["reason"] == "optional feature all null"
+
+
 def test_factor_quality_checker_reports_bucket_coverage_by_split(tmp_path) -> None:
     db_path = tmp_path / "factor-quality-splits.duckdb"
     build_factor_fixture(db_path)

@@ -195,7 +195,7 @@ Validation result:
 
 ### FSB-004: Valuation Bucket Is Blocked By Sparse `val_fcf_yield`
 
-Status: Open
+Status: Done
 
 Severity: High
 
@@ -228,6 +228,25 @@ Test plan:
 
 Suggested commit:
 - `fix valuation bucket sparse feature handling`
+
+Evidence:
+- Added `docs/factor_smoke_bug_fsb_004.md`.
+- Added focused valuation feature-selection coverage in
+  `tests/test_bucket_model_harness.py`.
+- Added quality-gate coverage for optional `val_fcf_yield` status in
+  `tests/test_factor_dataset_quality.py`.
+- Confirmed `val_fcf_yield` is reported as optional and partial in the smoke
+  panel.
+- Confirmed the valuation bucket computes using the five daily valuation yield
+  features while skipping `val_fcf_yield`.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_bucket_model_harness.py tests/test_factor_dataset_quality.py` passed.
+- `python scripts/experiments/check_factor_dataset_quality.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1` passed with output captured at `local_artifacts/factor_smoke_v1/fsb004_quality_report.txt`.
+- `python scripts/experiments/bucket_model_harness.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --buckets valuation --train-end 2021-12-31 --validation-end 2023-12-29 --test-end 2026-06-12 --embargo 21 --top-k 5` passed with output captured at `local_artifacts/factor_smoke_v1/fsb004_valuation_bucket_report.json`.
+- `python -m pytest tests` passed.
+- `git diff --check` passed.
 
 ### FSB-005: Sector Context Is Missing From Score Diagnostics
 

@@ -81,6 +81,46 @@ def seed_factor_model_table(
     conn.executemany(f"INSERT INTO factor_panel_v1 VALUES ({placeholders})", rows)
 
 
+def seed_valuation_model_table(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE factor_panel_v1 (
+            ticker VARCHAR,
+            date DATE,
+            panel_name VARCHAR,
+            val_earnings_yield DOUBLE,
+            val_fcf_yield DOUBLE,
+            future_21d_return DOUBLE,
+            winner_21d BIGINT,
+            prior_21d_return DOUBLE
+        )
+        """
+    )
+    start = date(2026, 1, 1)
+    specs = [
+        ("AAPL", 0.10, 0.03, 0.01),
+        ("MSFT", 0.05, 0.01, 0.00),
+        ("JPM", -0.02, -0.02, -0.01),
+    ]
+    rows = []
+    for offset in range(8):
+        trading_date = start + timedelta(days=offset)
+        for ticker, value_signal, future_return, prior_return in specs:
+            rows.append(
+                (
+                    ticker,
+                    trading_date,
+                    "unit",
+                    value_signal,
+                    None,
+                    future_return,
+                    int(future_return > 0),
+                    prior_return,
+                )
+            )
+    conn.executemany("INSERT INTO factor_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+
 def test_bucket_only_models_use_same_global_splits_and_ranking_metrics(tmp_path) -> None:
     db_path = tmp_path / "bucket-models.duckdb"
     conn = duckdb.connect(str(db_path))
@@ -193,6 +233,33 @@ def test_bucket_only_models_skip_sparse_optional_feature_without_skipping_bucket
         policy["skipped_optional_columns"][0]["reason"]
         == "optional feature has missing values in required-complete rows"
     )
+
+
+def test_bucket_only_models_skip_sparse_optional_valuation_feature(tmp_path) -> None:
+    db_path = tmp_path / "bucket-models-optional-valuation.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_valuation_model_table(conn)
+        summary = harness.run_bucket_only_models(
+            conn,
+            buckets=("valuation",),
+            train_end="2026-01-04",
+            validation_end="2026-01-06",
+            test_end="2026-01-08",
+            embargo=0,
+            top_k=1,
+        )
+    finally:
+        conn.close()
+
+    valuation = summary["buckets"]["valuation"]
+    assert valuation["status"] == "computed"
+    assert valuation["feature_columns"] == ["val_earnings_yield"]
+    policy = valuation["feature_policy"]
+    assert policy["required_columns"] == ["val_earnings_yield"]
+    assert policy["optional_columns"] == ["val_fcf_yield"]
+    assert policy["used_optional_columns"] == []
+    assert policy["skipped_optional_columns"][0]["column"] == "val_fcf_yield"
 
 
 def test_bucket_model_harness_cli_prints_report(monkeypatch, tmp_path, capsys) -> None:
