@@ -257,10 +257,10 @@ Evidence:
 - Added `docs/factor_smoke_bucket_only_results.md`.
 - Ran bucket-only ridge diagnostics on `factor_panel_large_cap_smoke_v1`.
 - Recorded validation and test top-K return, top-K win rate, and information
-  coefficient for price behavior, cross-sectional context, volatility/risk,
-  and regime context.
-- Recorded skipped bucket reasons for volume/liquidity, fundamental quality,
-  and valuation where complete training rows were unavailable.
+  coefficient for all currently testable buckets after the FSB availability
+  fixes.
+- Recorded fundamental quality as the remaining skipped bucket in the long
+  split because strict PIT features have no complete train or validation rows.
 - Hardened the bucket-only harness so no-complete-row buckets are recorded as
   skipped instead of aborting the full smoke run.
 
@@ -297,10 +297,10 @@ Evidence:
   reviewed bucket order.
 - Recorded `keep`, `watch`, or `reject` recommendations for every bucket.
 - Initial accepted smoke stack is `price_behavior + regime_context`.
-- Recorded rejected skipped steps for volume/liquidity, fundamental quality,
-  and valuation where complete training rows were unavailable.
-- Hardened the cumulative ablation harness so sparse candidate stacks are
-  recorded as rejected skipped steps instead of aborting the full run.
+- Recorded volume/liquidity and valuation as computed rejected steps after the
+  FSB availability fixes.
+- Recorded fundamental quality as the remaining rejected skipped step under the
+  long split.
 
 Validation result:
 - `python -m compileall scripts` passed.
@@ -350,9 +350,9 @@ Evidence:
   stack `price_behavior + regime_context`.
 - Exported 21,039 validation/test scored rows with zero duplicate
   `(ticker, date)` keys.
-- Included `prediction_score`, `future_21d_return`, `risk_beta_spy_21d`, and
-  `liq_adv_20d`; `sector` is unavailable in the current smoke panel and the
-  neutrality diagnostic skips it explicitly.
+- Included `prediction_score`, `future_21d_return`, `sector`, `industry`,
+  `risk_beta_spy_21d`, and `liq_adv_20d` after the post-fix score export
+  refresh.
 - Ran neutrality and turnover/capacity diagnostics against
   `factor_smoke_scores_v1`.
 
@@ -395,9 +395,10 @@ Evidence:
 - Aggregated validation and test ranking metrics by bucket.
 - Hardened the walk-forward aggregation so skipped bucket folds are counted and
   represented with null aggregate metrics instead of crashing.
-- Recorded that volume/liquidity, fundamental quality, and valuation skipped in
-  every fold because complete training rows were unavailable under full-bucket
-  complete-case policy.
+- Recorded that volume/liquidity and valuation compute after the feature
+  availability fixes.
+- Recorded that fundamental quality still skips every fold because strict PIT
+  features do not have long-split training coverage.
 
 Validation result:
 - `python -m compileall scripts` passed.
@@ -432,8 +433,8 @@ Evidence:
 - Ran neutrality diagnostics on `factor_smoke_scores_v1`.
 - Recorded full-panel top-K ranking metrics.
 - Recorded beta-adjusted ranking metrics using `risk_beta_spy_21d`.
-- Recorded sector diagnostics as explicitly skipped because `sector` is not
-  available in the scored smoke table.
+- Recorded sector-neutral, sector-breakdown, and top-K sector concentration
+  diagnostics after sector metadata was carried into the scored smoke table.
 
 Validation result:
 - `python scripts/experiments/factor_neutrality_diagnostics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --target-column future_21d_return --beta-column risk_beta_spy_21d --top-k 5` passed.
@@ -503,9 +504,9 @@ Evidence:
   `price_behavior + regime_context`.
 - Recorded model, target, split windows, validation/test summaries, turnover,
   cost-adjusted return, selected-name liquidity, artifact paths, and decision.
-- Set the decision to `watch`, not `yes`, because this is smoke-panel evidence,
-  sector diagnostics are unavailable, and sparse buckets still need a feature
-  policy.
+- Set the decision to `watch`, not `yes`, because this is smoke-panel evidence
+  and still needs full-stack walk-forward plus universe generalization before
+  promotion.
 
 Validation result:
 - `python -m pytest tests/test_factor_scoreboard_schema.py` passed.
@@ -584,7 +585,7 @@ Validation result:
 
 ### FSM-015: Refresh Post-Fix Smoke Decision Notes
 
-Status: Open
+Status: Done
 
 Scope:
 - Update stale smoke notes after the FSB blocker fixes.
@@ -612,6 +613,28 @@ Test plan:
 
 Suggested commit:
 - `refresh post fix factor smoke decision notes`
+
+Evidence:
+- Updated `docs/factor_experiment_scoreboard.md` so the `price_behavior +
+  regime_context` row no longer cites missing sector diagnostics or untestable
+  sparse buckets as current blockers.
+- Updated `docs/factor_smoke_next_path.md` to point to the frozen-candidate,
+  full-stack walk-forward, and universe generalization path.
+- Updated `docs/factor_smoke_bucket_only_results.md` with post-fix bucket-only
+  results where volume/liquidity and valuation compute and fundamental quality
+  remains skipped.
+- Updated `docs/factor_smoke_cumulative_ablations.md` with post-fix cumulative
+  recommendations where volume/liquidity and valuation are computed rejected
+  steps.
+- Updated `docs/factor_smoke_walk_forward_evaluation.md` with post-fix
+  bucket-only walk-forward results where volume/liquidity and valuation compute
+  across all folds.
+- Updated older evidence text in this backlog so it reflects the post-fix
+  state instead of the original blocker state.
+
+Validation result:
+- `python -m pytest tests/test_factor_scoreboard_schema.py` passed.
+- `git diff --check` passed.
 
 ### FSM-016: Run Full-Stack Walk-Forward For Frozen Candidate
 

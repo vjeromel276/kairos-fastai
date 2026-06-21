@@ -4,17 +4,22 @@ Run date: 2026-06-20
 
 ## Decision
 
-Status: pass with skipped sparse buckets.
+Status: pass for bucket-only walk-forward.
 
-The walk-forward driver now aggregates skipped bucket folds without failing.
-The full JSON report is stored locally and is not committed:
+The walk-forward driver aggregates bucket-only models across repeated
+chronological folds. After the feature availability fixes, volume/liquidity and
+valuation compute across all folds. Fundamental quality still skips every fold
+because strict PIT features do not have long-split training coverage.
+
+This run is bucket-only. It does not answer whether the combined
+`price_behavior + regime_context` stack is stable; that is tracked separately
+as `FSM-016`.
+
+Full local report:
 
 ```text
-local_artifacts/factor_smoke_v1/walk_forward_smoke_report.json
+local_artifacts/factor_smoke_v1/fsb001_walk_forward_report.json
 ```
-
-This run evaluates bucket-only models across repeated chronological folds. It
-does not replace the cumulative stack decision from the fixed split.
 
 ## Command Run
 
@@ -43,27 +48,32 @@ before test dates.
 | bucket | status counts | validation top-K avg return | validation win rate | validation IC | test top-K avg return | test win rate | test IC |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | price_behavior | computed 24 | 0.0214 | 0.5950 | 0.0354 | 0.0222 | 0.6040 | 0.0478 |
-| volume_liquidity | skipped 24 | n/a | n/a | n/a | n/a | n/a | n/a |
+| cross_sectional_context | computed 24 | 0.0203 | 0.5953 | 0.0429 | 0.0232 | 0.6063 | 0.0558 |
+| volume_liquidity | computed 24 | 0.0218 | 0.5970 | 0.0220 | 0.0216 | 0.6054 | 0.0321 |
 | volatility_risk | computed 24 | 0.0188 | 0.6014 | 0.0154 | 0.0185 | 0.5929 | 0.0074 |
 | fundamental_quality | skipped 24 | n/a | n/a | n/a | n/a | n/a | n/a |
-| valuation | skipped 24 | n/a | n/a | n/a | n/a | n/a | n/a |
+| valuation | computed 24 | 0.0165 | 0.5934 | 0.0056 | 0.0189 | 0.6063 | 0.0338 |
 | regime_context | computed 24 | 0.0181 | 0.5937 | n/a | 0.0183 | 0.5968 | n/a |
-| cross_sectional_context | computed 24 | 0.0203 | 0.5953 | 0.0429 | 0.0232 | 0.6063 | 0.0558 |
 
 ## Readout
 
-- `price_behavior` is stable across validation and test folds.
-- `cross_sectional_context` has the strongest test average among computed
-  bucket-only folds, but the fixed-split cumulative ablation rejected it
-  because it failed the validation-improvement rule versus price-only.
+- `price_behavior` remains stable across validation and test folds.
+- `cross_sectional_context` has the strongest bucket-only test average, but it
+  was rejected in the cumulative fixed-split ablation because it did not
+  improve validation versus price-only.
+- `volume_liquidity` is now testable across all folds but did not earn a
+  cumulative stack keep decision.
+- `valuation` is now testable across all folds but has weaker validation
+  evidence than price behavior.
 - `volatility_risk` is weaker in aggregate and has low test IC.
 - `regime_context` has positive top-K returns but undefined IC in aggregate
   because date-level regime features often produce identical cross-sectional
   scores within a date.
-- `volume_liquidity`, `fundamental_quality`, and `valuation` skipped in every
-  fold because their full-bucket complete-case training rows were unavailable.
+- `fundamental_quality` still needs either longer strict-PIT coverage or a
+  separately scoped recent-only experiment.
 
 ## Follow-Up
 
-The skipped bucket pattern reinforces the need for a per-bucket required-feature
-policy before treating sparse/full-null fields as mandatory inputs.
+Run a full-stack walk-forward diagnostic for the frozen
+`price_behavior + regime_context` candidate before using this smoke evidence to
+move to `universe_fastai_v1`.
