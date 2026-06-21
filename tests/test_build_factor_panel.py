@@ -78,6 +78,60 @@ def test_build_factor_panel_with_multiple_buckets(tmp_path) -> None:
     )
 
 
+def test_build_factor_panel_carries_static_ticker_metadata(tmp_path) -> None:
+    db_path = tmp_path / "factor-panel-metadata.duckdb"
+    conn = duckdb.connect(str(db_path))
+    try:
+        seed_panel_sources(conn)
+        conn.execute(
+            """
+            CREATE TABLE tickers (
+                ticker VARCHAR,
+                exchange VARCHAR,
+                sector VARCHAR,
+                industry VARCHAR
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO tickers VALUES (?, ?, ?, ?)",
+            [
+                ("AAPL", "NASDAQ", "Technology", "Consumer Electronics"),
+                ("MSFT", "NASDAQ", "Technology", "Software"),
+            ],
+        )
+        panel = panel_builder.build_factor_panel(
+            conn,
+            tickers=["AAPL", "MSFT"],
+            buckets=("price",),
+            end_date="2026-01-10",
+        )
+    finally:
+        conn.close()
+
+    assert {"exchange", "sector", "industry"}.issubset(panel.columns)
+    metadata = (
+        panel[["ticker", "exchange", "sector", "industry"]]
+        .drop_duplicates()
+        .sort_values("ticker")
+        .to_dict("records")
+    )
+    assert metadata == [
+        {
+            "ticker": "AAPL",
+            "exchange": "NASDAQ",
+            "sector": "Technology",
+            "industry": "Consumer Electronics",
+        },
+        {
+            "ticker": "MSFT",
+            "exchange": "NASDAQ",
+            "sector": "Technology",
+            "industry": "Software",
+        },
+    ]
+
+
 def test_factor_panel_cli_writes_output_table_with_default_constrained_panel(
     monkeypatch,
     tmp_path,

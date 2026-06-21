@@ -54,6 +54,7 @@ DEFAULT_SOURCE_TABLE = "sep_base"
 DEFAULT_SPY_TABLE = "sfp"
 DEFAULT_DAILY_TABLE = "daily"
 DEFAULT_SF1_TABLE = "sf1"
+DEFAULT_TICKERS_TABLE = "tickers"
 DEFAULT_UNIVERSE_TABLE = "universe_fastai_v1"
 DEFAULT_OUTPUT_TABLE = "factor_panel_v1"
 DEFAULT_PANEL = "large_cap_fixed"
@@ -230,6 +231,71 @@ def load_spy_prices(
         ORDER BY date
     """
     return conn.execute(query, params).fetchdf()
+
+
+def load_ticker_metadata(
+    conn: duckdb.DuckDBPyConnection,
+    tickers: list[str],
+    tickers_table: str = DEFAULT_TICKERS_TABLE,
+) -> pd.DataFrame:
+    columns = table_columns(conn, tickers_table)
+    if not columns:
+        return pd.DataFrame(columns=["ticker"])
+
+    metadata_columns = [
+        column for column in ("exchange", "sector", "industry") if column in columns
+    ]
+    if not metadata_columns:
+        return pd.DataFrame(columns=["ticker"])
+
+    selected_tickers = normalize_tickers(tickers)
+    if not selected_tickers:
+        return pd.DataFrame(columns=["ticker", *metadata_columns])
+
+    placeholders = ", ".join(["?"] * len(selected_tickers))
+    select_columns = ["ticker", *metadata_columns]
+    internal_columns = list(select_columns)
+    if "lastupdated" in columns:
+        internal_columns.append("lastupdated")
+    select_list = ", ".join(quote_identifier(column) for column in internal_columns)
+    query = f"""
+        SELECT {select_list}
+        FROM {quote_identifier(tickers_table)}
+        WHERE ticker IN ({placeholders})
+        ORDER BY ticker
+    """
+    metadata = conn.execute(query, selected_tickers).fetchdf()
+    if metadata.empty:
+        return pd.DataFrame(columns=["ticker", *metadata_columns])
+
+    if "lastupdated" in metadata.columns:
+        metadata["_metadata_lastupdated"] = pd.to_datetime(
+            metadata["lastupdated"],
+            errors="coerce",
+        )
+        metadata = (
+            metadata.sort_values(
+                ["ticker", "_metadata_lastupdated"],
+                na_position="first",
+            )
+            .drop_duplicates("ticker", keep="last")
+            .drop(columns=["lastupdated", "_metadata_lastupdated"])
+        )
+    else:
+        metadata = metadata.drop_duplicates("ticker", keep="last")
+    return metadata[select_columns].reset_index(drop=True)
+
+
+def add_ticker_metadata(panel: pd.DataFrame, metadata: pd.DataFrame) -> pd.DataFrame:
+    if metadata.empty or "ticker" not in metadata.columns:
+        return panel
+    metadata_columns = [
+        column for column in ("exchange", "sector", "industry") if column in metadata.columns
+    ]
+    if not metadata_columns:
+        return panel
+    clean_metadata = metadata[["ticker", *metadata_columns]].drop_duplicates("ticker")
+    return panel.merge(clean_metadata, on="ticker", how="left")
 
 
 def load_optional_table(
@@ -446,6 +512,7 @@ def build_factor_panel(
     spy_table: str = DEFAULT_SPY_TABLE,
     daily_table: str = DEFAULT_DAILY_TABLE,
     sf1_table: str = DEFAULT_SF1_TABLE,
+    tickers_table: str = DEFAULT_TICKERS_TABLE,
     start_date: str | None = None,
     end_date: str | None = None,
     horizons: tuple[int, ...] = (21, 5),
@@ -462,6 +529,10 @@ def build_factor_panel(
         prices,
         panel_name=panel_name,
         horizons=clean_horizons,
+    )
+    panel = add_ticker_metadata(
+        panel,
+        load_ticker_metadata(conn, tickers=tickers, tickers_table=tickers_table),
     )
     panel = apply_feature_buckets(
         conn,
@@ -541,6 +612,11 @@ def main() -> int:
         help=f"SF1 source table (default: {DEFAULT_SF1_TABLE})",
     )
     parser.add_argument(
+        "--tickers-table",
+        default=DEFAULT_TICKERS_TABLE,
+        help=f"Ticker metadata source table (default: {DEFAULT_TICKERS_TABLE})",
+    )
+    parser.add_argument(
         "--universe-table",
         default=DEFAULT_UNIVERSE_TABLE,
         help=f"Universe table for explicit universe builds (default: {DEFAULT_UNIVERSE_TABLE})",
@@ -580,6 +656,7 @@ def main() -> int:
             spy_table=args.spy_table,
             daily_table=args.daily_table,
             sf1_table=args.sf1_table,
+            tickers_table=args.tickers_table,
             start_date=args.start_date,
             end_date=args.end_date,
             horizons=horizons,

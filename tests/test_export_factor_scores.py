@@ -20,6 +20,7 @@ def seed_factor_score_table(conn: duckdb.DuckDBPyConnection) -> None:
             winner_21d BIGINT,
             prior_21d_return DOUBLE,
             sector VARCHAR,
+            industry VARCHAR,
             risk_beta_spy_21d DOUBLE,
             liq_adv_20d DOUBLE
         )
@@ -27,14 +28,14 @@ def seed_factor_score_table(conn: duckdb.DuckDBPyConnection) -> None:
     )
     start = date(2026, 1, 1)
     specs = [
-        ("AAPL", 1.0, 0.5, "Technology", 1.2, 1000.0),
-        ("MSFT", 0.3, 0.2, "Technology", 1.1, 2000.0),
-        ("JPM", -0.8, -0.1, "Financials", 0.8, 3000.0),
+        ("AAPL", 1.0, 0.5, "Technology", "Consumer Electronics", 1.2, 1000.0),
+        ("MSFT", 0.3, 0.2, "Technology", "Software", 1.1, 2000.0),
+        ("JPM", -0.8, -0.1, "Financials", "Banks", 0.8, 3000.0),
     ]
     rows = []
     for offset in range(8):
         trading_date = start + timedelta(days=offset)
-        for ticker, px_signal, regime_signal, sector, beta, liquidity in specs:
+        for ticker, px_signal, regime_signal, sector, industry, beta, liquidity in specs:
             future_return = px_signal * 0.02 + regime_signal * 0.01
             rows.append(
                 (
@@ -47,12 +48,13 @@ def seed_factor_score_table(conn: duckdb.DuckDBPyConnection) -> None:
                     int(future_return > 0),
                     px_signal * 0.005,
                     sector,
+                    industry,
                     beta,
                     liquidity,
                 )
             )
     conn.executemany(
-        "INSERT INTO factor_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO factor_panel_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rows,
     )
 
@@ -85,6 +87,7 @@ def test_export_factor_scores_writes_unique_scored_table(tmp_path) -> None:
     assert summary["duplicate_key_count"] == 0
     assert summary["optional_columns"] == [
         "sector",
+        "industry",
         "risk_beta_spy_21d",
         "liq_adv_20d",
     ]
@@ -98,6 +101,7 @@ def test_export_factor_scores_writes_unique_scored_table(tmp_path) -> None:
         "prediction_score",
         "future_21d_return",
         "sector",
+        "industry",
         "risk_beta_spy_21d",
         "liq_adv_20d",
     }.issubset(scored.columns)

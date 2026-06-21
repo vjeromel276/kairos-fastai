@@ -36,6 +36,7 @@ DEFAULT_OUTPUT_TABLE = "factor_smoke_scores_v1"
 DEFAULT_SCORE_SPLITS = ("validation", "test")
 OPTIONAL_DIAGNOSTIC_COLUMNS = (
     "sector",
+    "industry",
     "risk_beta_spy_21d",
     "liq_adv_20d",
 )

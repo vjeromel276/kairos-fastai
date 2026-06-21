@@ -250,7 +250,7 @@ Validation result:
 
 ### FSB-005: Sector Context Is Missing From Score Diagnostics
 
-Status: Open
+Status: Done
 
 Severity: Medium
 
@@ -282,6 +282,28 @@ Test plan:
 
 Suggested commit:
 - `add sector context to factor smoke scores`
+
+Evidence:
+- Added `docs/factor_smoke_bug_fsb_005.md`.
+- Confirmed the local `tickers` table has static `sector` and `industry`
+  metadata available for the smoke tickers.
+- Updated the factor panel builder to carry `exchange`, `sector`, and
+  `industry` from the ticker metadata source when available.
+- Updated the score exporter to carry `industry` alongside `sector`,
+  `risk_beta_spy_21d`, and `liq_adv_20d`.
+- Rebuilt `factor_panel_large_cap_smoke_v1` with 135,455 non-null `sector`
+  rows and 135,455 non-null `industry` rows.
+- Re-exported `factor_smoke_scores_v1` with 21,039 scored rows, all with
+  non-null `sector` and `industry`.
+- Confirmed sector neutrality, sector breakdown, and top-K sector concentration
+  diagnostics now compute.
+
+Validation result:
+- `python -m compileall scripts` passed.
+- `python -m pytest tests/test_build_factor_panel.py tests/test_export_factor_scores.py tests/test_factor_neutrality_diagnostics.py` passed.
+- `python scripts/experiments/build_factor_panel.py --db data/kairos-fastai.duckdb --panel large_cap_fixed --buckets price volume volatility fundamental valuation regime cross_sectional --output-table factor_panel_large_cap_smoke_v1` passed.
+- `python scripts/experiments/export_factor_scores.py --db data/kairos-fastai.duckdb --table factor_panel_large_cap_smoke_v1 --output-table factor_smoke_scores_v1 --bucket-stack price regime --train-end 2021-12-31 --validation-end 2023-12-29 --test-end 2026-06-12 --score-splits validation test --embargo 21` passed with output captured at `local_artifacts/factor_smoke_v1/fsb005_score_export_report.json`.
+- `python scripts/experiments/factor_neutrality_diagnostics.py --db data/kairos-fastai.duckdb --table factor_smoke_scores_v1 --score-column prediction_score --target-column future_21d_return --beta-column risk_beta_spy_21d --top-k 5` passed with output captured at `local_artifacts/factor_smoke_v1/fsb005_neutrality_report.json`.
 
 ### FSB-006: Validation/Test Score Summaries Are Not Split In Diagnostics Notes
 
