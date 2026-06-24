@@ -1,0 +1,144 @@
+Factor dataset quality report: factor_panel_large_cap_smoke_v1
+Rows: 135,455
+Tickers: 20
+Panels: 1
+Date range: 1997-12-31 00:00:00 -> 2026-06-18 00:00:00
+Duplicate ticker/date keys: 0
+Null key counts:
+  null_ticker_rows: 0
+  null_date_rows: 0
+Feature null counts:
+  px_return_1d: 20
+  px_return_5d: 100
+  px_return_21d: 420
+  px_return_63d: 1,260
+  px_return_126d: 2,520
+  px_return_252d: 5,040
+  px_ma_dist_21d: 400
+  px_ma_dist_63d: 1,240
+  px_ma_dist_252d: 5,020
+  px_drawdown_252d: 5,020
+  px_short_reversal_5d: 100
+  liq_dollar_volume: 0
+  liq_is_price_eligible: 0
+  liq_volume_avg_20d: 380
+  liq_adv_20d: 380
+  liq_rel_volume_20d: 380
+  liq_volume_avg_60d: 1,180
+  liq_adv_60d: 1,180
+  liq_rel_volume_60d: 1,180
+  liq_is_adv20_eligible: 0
+  liq_turnover: 135,455
+  liq_is_liquid: 0
+  risk_realized_vol_21d: 420
+  risk_downside_vol_21d: 420
+  risk_max_drawdown_21d: 400
+  risk_beta_spy_21d: 420
+  risk_idio_vol_spy_21d: 420
+  risk_realized_vol_63d: 1,260
+  risk_downside_vol_63d: 1,260
+  risk_max_drawdown_63d: 1,240
+  risk_beta_spy_63d: 1,260
+  risk_idio_vol_spy_63d: 1,260
+  risk_realized_vol_252d: 5,040
+  risk_downside_vol_252d: 5,040
+  risk_max_drawdown_252d: 5,020
+  risk_beta_spy_252d: 5,040
+  risk_idio_vol_spy_252d: 5,040
+  qual_gross_margin: 132,187
+  qual_operating_margin: 132,187
+  qual_net_margin: 132,187
+  qual_roa: 132,187
+  qual_roe: 132,187
+  qual_roic: 132,187
+  qual_revenue_growth: 132,187
+  qual_earnings_growth: 132,187
+  qual_debt_to_assets: 132,187
+  val_earnings_yield: 3,696
+  val_sales_yield: 3,696
+  val_book_yield: 3,696
+  val_ebit_ev_yield: 3,696
+  val_ebitda_ev_yield: 3,696
+  val_fcf_yield: 132,320
+  regime_spy_return_21d: 336
+  regime_spy_trend_50d: 784
+  regime_spy_above_ma_50d: 784
+  regime_spy_trend_200d: 3,184
+  regime_spy_above_ma_200d: 3,184
+  regime_spy_realized_vol_21d: 336
+  regime_spy_realized_vol_63d: 1,008
+  regime_spy_drawdown_252d: 4,016
+  regime_spy_risk_on_score_21d: 336
+  regime_breadth_px_return_21d_positive: 336
+  xs_px_return_21d_rank: 420
+  xs_liq_dollar_volume_rank: 0
+  xs_risk_realized_vol_21d_rank: 420
+  xs_liq_dollar_volume_z: 0
+  xs_risk_realized_vol_21d_z: 420
+  xs_px_return_21d_minus_spy: 420
+Bucket availability:
+  price_behavior: columns=11, rows_any=135,435, rows_all=130,415, null_values=21,140
+  cross_sectional_context: columns=6, rows_any=135,455, rows_all=135,035, null_values=1,680
+  volume_liquidity: columns=11, rows_any=135,455, rows_all=0, null_values=140,135
+  volatility_risk: columns=15, rows_any=135,055, rows_all=130,415, null_values=33,540
+  fundamental_quality: columns=9, rows_any=3,268, rows_all=3,268, null_values=1,189,683
+  valuation: columns=6, rows_any=131,759, rows_all=3,135, null_values=150,800
+  regime_context: columns=10, rows_any=135,119, rows_all=131,439, null_values=14,304
+  legacy_rsi: columns=0, rows_any=0, rows_all=0, null_values=0
+Feature policy availability:
+  volume_liquidity:
+    optional liq_turnover: status=skipped, non_null_rows=0, null_rows=135,455, reason=optional feature all null
+  valuation:
+    optional val_fcf_yield: status=partial, non_null_rows=3,135, null_rows=132,320, reason=optional feature has missing values
+Bucket split availability:
+  price_behavior:
+    train: rows=113,156, columns=11, rows_any=113,136, rows_all=108,116, rows_all_with_primary_target=108,116
+    validation: rows=9,600, columns=11, rows_any=9,600, rows_all=9,600, rows_all_with_primary_target=9,600
+    test: rows=11,779, columns=11, rows_any=11,779, rows_all=11,779, rows_all_with_primary_target=11,439
+  cross_sectional_context:
+    train: rows=113,156, columns=6, rows_any=113,156, rows_all=112,736, rows_all_with_primary_target=112,736
+    validation: rows=9,600, columns=6, rows_any=9,600, rows_all=9,600, rows_all_with_primary_target=9,600
+    test: rows=11,779, columns=6, rows_any=11,779, rows_all=11,779, rows_all_with_primary_target=11,439
+  volume_liquidity:
+    train: rows=113,156, columns=11, rows_any=113,156, rows_all=0, rows_all_with_primary_target=0
+    validation: rows=9,600, columns=11, rows_any=9,600, rows_all=0, rows_all_with_primary_target=0
+    test: rows=11,779, columns=11, rows_any=11,779, rows_all=0, rows_all_with_primary_target=0
+  volatility_risk:
+    train: rows=113,156, columns=15, rows_any=112,756, rows_all=108,116, rows_all_with_primary_target=108,116
+    validation: rows=9,600, columns=15, rows_any=9,600, rows_all=9,600, rows_all_with_primary_target=9,600
+    test: rows=11,779, columns=15, rows_any=11,779, rows_all=11,779, rows_all_with_primary_target=11,439
+  fundamental_quality:
+    train: rows=113,156, columns=9, rows_any=0, rows_all=0, rows_all_with_primary_target=0
+    validation: rows=9,600, columns=9, rows_any=0, rows_all=0, rows_all_with_primary_target=0
+    test: rows=11,779, columns=9, rows_any=3,188, rows_all=3,188, rows_all_with_primary_target=2,848
+  valuation:
+    train: rows=113,156, columns=6, rows_any=109,460, rows_all=0, rows_all_with_primary_target=0
+    validation: rows=9,600, columns=6, rows_any=9,600, rows_all=0, rows_all_with_primary_target=0
+    test: rows=11,779, columns=6, rows_any=11,779, rows_all=3,067, rows_all_with_primary_target=2,778
+  regime_context:
+    train: rows=113,156, columns=10, rows_any=112,820, rows_all=109,140, rows_all_with_primary_target=109,140
+    validation: rows=9,600, columns=10, rows_any=9,600, rows_all=9,600, rows_all_with_primary_target=9,600
+    test: rows=11,779, columns=10, rows_any=11,779, rows_all=11,779, rows_all_with_primary_target=11,439
+  legacy_rsi:
+    train: rows=113,156, columns=0, rows_any=0, rows_all=0, rows_all_with_primary_target=0
+    validation: rows=9,600, columns=0, rows_any=0, rows_all=0, rows_all_with_primary_target=0
+    test: rows=11,779, columns=0, rows_any=0, rows_all=0, rows_all_with_primary_target=0
+Target availability:
+  horizon_21d:
+    target_available_rows: 135,035
+    target_null_rows: 420
+    winner_available_rows: 135,035
+    winner_null_rows: 420
+    unexpected_winner_nulls: 0
+    unexpected_winner_values: 0
+    invalid_winner_values: 0
+  horizon_5d:
+    target_available_rows: 135,355
+    target_null_rows: 100
+    winner_available_rows: 135,355
+    winner_null_rows: 100
+    unexpected_winner_nulls: 0
+    unexpected_winner_values: 0
+    invalid_winner_values: 0
+Unclassified columns: closeadj, volume
+Valid: True
